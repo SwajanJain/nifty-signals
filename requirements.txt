@@ -1,0 +1,6 @@
+yfinance>=0.2.36
+pandas>=2.0.0
+pandas-ta>=0.3.14b
+rich>=13.0.0
+typer>=0.9.0
+numpy>=1.24.0
