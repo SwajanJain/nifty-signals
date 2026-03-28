@@ -545,6 +545,22 @@ class PortfolioRiskManager:
         available = self.max_portfolio_risk - current_risk
         return max(0, available) * self.capital
 
+    def adjust_for_correlation(self, new_symbol: str,
+                               returns_data: Dict[str, pd.Series]) -> float:
+        """Adjust position size based on correlation with existing positions.
+
+        Returns a multiplier (0.5–1.0) to apply to the position size.
+        High correlation with existing holdings → reduced size.
+        """
+        from risk.portfolio_risk import PortfolioRiskCalculator
+
+        existing = [p['symbol'] for p in self.open_positions if 'symbol' in p]
+        if not existing:
+            return 1.0
+
+        calc = PortfolioRiskCalculator()
+        return calc.correlation_size_multiplier(new_symbol, existing, returns_data)
+
     def get_portfolio_summary(self) -> Dict:
         """Get portfolio risk summary."""
         total_value = sum(p.get('position_value', 0) for p in self.open_positions)

@@ -109,6 +109,7 @@ class FundamentalProfile:
     debt_to_equity: float = 0.0
     current_ratio: float = 0.0
     interest_coverage: float = 0.0
+    is_debt_free: bool = False
 
     # --- Cash Flow ---
     operating_cash_flow: float = 0.0  # Cr (latest year)

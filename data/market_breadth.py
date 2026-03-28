@@ -278,6 +278,76 @@ def calculate_breadth_from_existing(data: Dict[str, pd.DataFrame]) -> Dict:
     return calculator.calculate_breadth(data)
 
 
+# =============================================================================
+# TRIN (Arms Index) Calculation
+# =============================================================================
+
+def calculate_trin(advances: int, declines: int,
+                   advancing_volume: float, declining_volume: float) -> Dict:
+    """
+    TRIN (Arms Index) = (Advancing Issues / Declining Issues)
+                       / (Advancing Volume / Declining Volume)
+
+    TRIN < 1.0 = Bullish (money flowing into advancing stocks)
+    TRIN > 1.0 = Bearish (money flowing into declining stocks)
+    TRIN > 2.0 = Panic selling (contrarian buy signal)
+    TRIN < 0.5 = Euphoria (contrarian sell signal)
+    """
+    if declines == 0 or declining_volume == 0:
+        return {'trin': 0, 'signal': 'UNDEFINED'}
+
+    ad_ratio = advances / declines
+    vol_ratio = advancing_volume / declining_volume
+    trin = ad_ratio / vol_ratio
+
+    if trin > 2.0:
+        signal = 'PANIC_SELLING'  # Contrarian buy
+    elif trin > 1.0:
+        signal = 'BEARISH'
+    elif trin > 0.5:
+        signal = 'BULLISH'
+    else:
+        signal = 'EUPHORIA'  # Contrarian sell
+
+    return {'trin': round(trin, 2), 'signal': signal}
+
+
+# =============================================================================
+# nsetools-based fast breadth (when available)
+# =============================================================================
+
+def fetch_nse_breadth() -> Optional[Dict]:
+    """Fetch real-time breadth data from NSE via nsetools.
+
+    Much faster than fetching individual stocks via yfinance.
+    Falls back gracefully if nsetools is not installed.
+    """
+    try:
+        from nsetools import Nse
+        nse = Nse()
+
+        adv_dec = nse.get_advances_declines()
+        top_gainers = nse.get_top_gainers()
+        top_losers = nse.get_top_losers()
+
+        total_adv = sum(int(x.get('advances', 0)) for x in adv_dec) if adv_dec else 0
+        total_dec = sum(int(x.get('declines', 0)) for x in adv_dec) if adv_dec else 0
+
+        return {
+            'source': 'nsetools',
+            'advances': total_adv,
+            'declines': total_dec,
+            'ad_ratio': round(total_adv / total_dec, 2) if total_dec > 0 else 0,
+            'top_gainers': top_gainers[:5] if top_gainers else [],
+            'top_losers': top_losers[:5] if top_losers else [],
+        }
+    except ImportError:
+        return None
+    except Exception as e:
+        print(f"nsetools breadth failed: {e}")
+        return None
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("MARKET BREADTH CALCULATOR TEST")

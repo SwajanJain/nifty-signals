@@ -7,6 +7,7 @@ and price action patterns to generate buy/sell signals.
 """
 
 import sys
+import json
 from pathlib import Path
 from datetime import datetime
 
@@ -945,6 +946,807 @@ def full_scan(
     output.display_composite_scan(composites, top_n=top)
 
     console.print(f"\n[dim]Total: {len(composites)} stocks scored | Showing top {min(top, len(composites))}[/dim]")
+
+
+# =============================================================================
+# Fund / ETF Commands
+# =============================================================================
+
+
+def _resolve_portfolio_schemes(universe, portfolio: Optional[str]):
+    schemes = []
+    if not portfolio:
+        return schemes
+    for raw in portfolio.split(","):
+        query = raw.strip()
+        if not query:
+            continue
+        scheme = universe.find(query)
+        if scheme:
+            schemes.append(scheme)
+    return schemes
+
+
+def _load_imported_portfolio(path: Optional[str]):
+    if not path:
+        return None
+    from funds.portfolio_loader import load_portfolio
+    return load_portfolio(Path(path))
+
+
+def _build_fund_scorer(refresh_holdings: bool = False):
+    from funds import FundScorer
+    from funds.scorer import LiveFundamentalScoreProvider, LiveTailwindProvider
+
+    return FundScorer(
+        fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
+        tailwind_provider=LiveTailwindProvider(),
+    )
+
+
+@app.command()
+def fund_sync():
+    """Sync local fund metadata and NAV history."""
+    from funds.sync import FundSyncService
+
+    result = FundSyncService().sync_universe(write=True)
+    console.print_json(data=result)
+
+
+@app.command()
+def fund_import_portfolio(
+    path: str = typer.Argument(..., help="Path to CSV, JSON, or CAS PDF"),
+    name: Optional[str] = typer.Option(None, "--name", help="Portfolio name override"),
+):
+    """Import a portfolio for overlap-aware fund recommendations."""
+    from funds.cache import FundCache
+    from funds.portfolio_loader import load_portfolio
+
+    imported = load_portfolio(Path(path), name=name)
+    payload = {
+        "name": imported.name,
+        "source": imported.source,
+        "as_of": imported.as_of,
+        "positions": [
+            {
+                "kind": position.kind,
+                "identifier": position.identifier,
+                "name": position.name,
+                "weight": position.weight,
+                "units": position.units,
+                "amount": position.amount,
+            }
+            for position in imported.positions
+        ],
+    }
+    FundCache().set_imported_portfolio(imported.name, imported.source, payload)
+    console.print_json(data={"name": imported.name, "source": imported.source, "positions": len(imported.positions)})
+
+
+@app.command()
+def fund_portfolio_fit(
+    scheme: str = typer.Argument(..., help="Scheme name or identifier"),
+    portfolio_file: Optional[str] = typer.Option(None, "--portfolio-file", help="Imported portfolio file path"),
+    portfolio_name: Optional[str] = typer.Option(None, "--portfolio-name", help="Previously imported portfolio name"),
+):
+    """Evaluate a scheme against an imported portfolio."""
+    from funds.cache import FundCache
+    from funds.portfolio_fit import PortfolioFitAnalyzer
+    from funds.portfolio_loader import load_portfolio
+    from funds.universe import FundUniverse
+
+    universe = FundUniverse()
+    target = universe.find(scheme)
+    if not target:
+        console.print(f"[red]Could not find scheme: {scheme}[/red]")
+        raise typer.Exit(1)
+
+    imported = None
+    if portfolio_file:
+        imported = load_portfolio(Path(portfolio_file))
+    elif portfolio_name:
+        payload = FundCache().get_imported_portfolio(portfolio_name)
+        if not payload:
+            console.print(f"[red]No imported portfolio found: {portfolio_name}[/red]")
+            raise typer.Exit(1)
+        from funds.models import ImportedPortfolio, ImportedPosition
+        imported = ImportedPortfolio(
+            name=payload["name"],
+            source=payload.get("source", "cached"),
+            as_of=payload.get("as_of", ""),
+            positions=[
+                ImportedPosition(
+                    kind=item["kind"],
+                    identifier=item["identifier"],
+                    name=item.get("name", item["identifier"]),
+                    weight=float(item.get("weight", 0.0)),
+                    units=float(item.get("units", 0.0)),
+                    amount=float(item.get("amount", 0.0)),
+                )
+                for item in payload.get("positions", [])
+            ],
+        )
+    else:
+        console.print("[red]Provide either --portfolio-file or --portfolio-name.[/red]")
+        raise typer.Exit(1)
+
+    fit = PortfolioFitAnalyzer().analyze_imported(target, imported, universe=universe)
+    console.print_json(
+        data={
+            "scheme": target.name,
+            "portfolio": imported.name,
+            "fit_label": fit.fit_label,
+            "fit_score": fit.fit_score,
+            "overlap_pct": fit.overlap_pct,
+            "notes": fit.notes,
+        }
+    )
+
+
+@app.command()
+def fund_review_write(
+    scheme: str = typer.Argument(..., help="Scheme name or identifier"),
+    verdict: str = typer.Option(..., "--verdict", help="INVEST, STAGGER, WATCH, AVOID"),
+    confidence: str = typer.Option("MEDIUM", "--confidence", help="LOW, MEDIUM, HIGH"),
+    thesis: str = typer.Option("", "--thesis", help="Short thesis"),
+    reviewer: str = typer.Option("claude", "--reviewer", help="Reviewer name"),
+):
+    """Write or update a manual review entry for a scheme."""
+    from funds.models import FundResearchReview
+    from funds.review_store import WritableResearchReviewStore
+    from funds.universe import FundUniverse
+
+    universe = FundUniverse()
+    target = universe.find(scheme)
+    if not target:
+        console.print(f"[red]Could not find scheme: {scheme}[/red]")
+        raise typer.Exit(1)
+
+    store = WritableResearchReviewStore()
+    existing = store.get(target.scheme_id)
+    review = FundResearchReview(
+        scheme_id=target.scheme_id,
+        validated_at=datetime.now().date().isoformat(),
+        reviewer=reviewer,
+        verdict=verdict.upper(),
+        confidence=confidence.upper(),
+        thesis_quality_score=existing.thesis_quality_score if existing else 70,
+        evidence_quality_score=existing.evidence_quality_score if existing else 70,
+        portfolio_fit_score=existing.portfolio_fit_score if existing else 70,
+        strengths=list(existing.strengths) if existing else [],
+        concerns=list(existing.concerns) if existing else [],
+        open_questions=list(existing.open_questions) if existing else [],
+        thesis=thesis or (existing.thesis if existing else ""),
+        disconfirmations=list(existing.disconfirmations) if existing else [],
+        notes=list(existing.notes) if existing else [],
+    )
+    store.upsert(review)
+    console.print_json(data={"scheme": target.name, "verdict": review.verdict, "confidence": review.confidence})
+
+
+@app.command()
+def fund_review_list_stale(
+    max_age_days: int = typer.Option(30, "--max-age-days", help="Max review age before staleness"),
+):
+    """List stale fund reviews."""
+    from funds.review_store import WritableResearchReviewStore
+
+    items = WritableResearchReviewStore().list_stale(max_age_days=max_age_days)
+    console.print_json(
+        data={
+            "count": len(items),
+            "reviews": [
+                {"scheme_id": item.scheme_id, "validated_at": item.validated_at, "verdict": item.verdict}
+                for item in items
+            ],
+        }
+    )
+
+
+@app.command()
+def fund_sip_backtest(
+    scheme: str = typer.Argument(..., help="Scheme name or identifier"),
+    monthly_amount: float = typer.Option(10000, "--monthly-amount", help="Monthly SIP amount"),
+):
+    """Run a simple SIP backtest from cached NAV history."""
+    from funds.backtest import backtest_single_scheme_sip
+    from funds.cache import FundCache
+    from funds.universe import FundUniverse
+
+    universe = FundUniverse()
+    target = universe.find(scheme)
+    if not target:
+        console.print(f"[red]Could not find scheme: {scheme}[/red]")
+        raise typer.Exit(1)
+
+    history = FundCache().get_nav_history(target.scheme_id)
+    if not history:
+        console.print("[red]No NAV history found. Run fund-sync first.[/red]")
+        raise typer.Exit(1)
+
+    result = backtest_single_scheme_sip(target.scheme_id, history, monthly_amount)
+    console.print_json(
+        data={
+            "scheme": target.name,
+            "months": result.sip.months,
+            "invested": result.sip.invested,
+            "final_value": result.sip.final_value,
+            "absolute_return_pct": result.sip.absolute_return_pct,
+        }
+    )
+
+
+@app.command()
+def fund_scan(
+    top: int = typer.Option(10, "--top", "-n", help="Show top N funds"),
+    strategy: Optional[str] = typer.Option(
+        None, "--strategy", "-s", help="Filter by strategy: core, thematic, sectoral"
+    ),
+    vehicle: Optional[str] = typer.Option(
+        None, "--vehicle", "-v", help="Filter by vehicle: mutual_fund, etf"
+    ),
+    theme: Optional[str] = typer.Option(
+        None, "--theme", "-t", help="Filter by theme or sector"
+    ),
+    refresh_holdings: bool = typer.Option(
+        False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+    portfolio: Optional[str] = typer.Option(
+        None, "--portfolio", help="Comma-separated existing fund names for overlap checks"
+    ),
+    portfolio_file: Optional[str] = typer.Option(
+        None, "--portfolio-file", help="CSV/JSON/CAS portfolio file for look-through overlap checks"
+    ),
+):
+    """
+    Scan the curated fund universe and rank schemes by investability.
+
+    Examples:
+        python main.py fund-scan
+        python main.py fund-scan --strategy thematic --theme defense
+        python main.py fund-scan --vehicle etf
+    """
+    from funds import FundOutput, FundUniverse
+
+    console.print("\n[bold cyan]Fund / ETF Scan[/bold cyan]\n")
+
+    universe = FundUniverse()
+    schemes = universe.filter(strategy_type=strategy, vehicle_type=vehicle, theme=theme)
+    if not schemes:
+        console.print("[red]No schemes matched the requested filters.[/red]")
+        raise typer.Exit(1)
+
+    scorer = _build_fund_scorer(refresh_holdings=refresh_holdings)
+    current_portfolio = _resolve_portfolio_schemes(universe, portfolio)
+    imported = _load_imported_portfolio(portfolio_file)
+    analyses = [scorer.analyze(scheme, current_portfolio=current_portfolio) for scheme in schemes]
+    if imported:
+        from funds.portfolio_fit import PortfolioFitAnalyzer
+        fit_analyzer = PortfolioFitAnalyzer()
+        for analysis in analyses:
+            fit = fit_analyzer.analyze_imported(analysis.scheme, imported, universe=universe)
+            analysis.portfolio_fit = fit
+            analysis.portfolio_fit_score = fit.fit_score // 10
+    analyses.sort(key=lambda a: a.overall_score, reverse=True)
+
+    FundOutput().display_scan_results(analyses, top_n=top)
+    console.print(f"\n[dim]Scored {len(analyses)} schemes[/dim]")
+
+
+@app.command()
+def fund_analyze(
+    scheme: str = typer.Argument(..., help="Scheme name or identifier"),
+    refresh_holdings: bool = typer.Option(
+        False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+    portfolio: Optional[str] = typer.Option(
+        None, "--portfolio", help="Comma-separated existing fund names for overlap checks"
+    ),
+    portfolio_file: Optional[str] = typer.Option(
+        None, "--portfolio-file", help="CSV/JSON/CAS portfolio file for look-through overlap checks"
+    ),
+):
+    """
+    Deep analysis of a mutual fund or ETF.
+
+    Examples:
+        python main.py fund-analyze "Parag Parikh Flexi Cap Fund"
+        python main.py fund-analyze "HDFC Defence Fund" --portfolio "Parag Parikh Flexi Cap Fund"
+    """
+    from funds import FundOutput, FundUniverse
+
+    universe = FundUniverse()
+    target = universe.find(scheme)
+    if not target:
+        console.print(f"[red]Could not find scheme: {scheme}[/red]")
+        raise typer.Exit(1)
+
+    scorer = _build_fund_scorer(refresh_holdings=refresh_holdings)
+    current_portfolio = _resolve_portfolio_schemes(universe, portfolio)
+    analysis = scorer.analyze(target, current_portfolio=current_portfolio)
+    imported = _load_imported_portfolio(portfolio_file)
+    if imported:
+        from funds.portfolio_fit import PortfolioFitAnalyzer
+        fit = PortfolioFitAnalyzer().analyze_imported(target, imported, universe=universe)
+        analysis.portfolio_fit = fit
+        analysis.portfolio_fit_score = fit.fit_score // 10
+    FundOutput().display_scheme_analysis(analysis)
+
+
+@app.command()
+def fund_compare(
+    schemes: str = typer.Argument(
+        ..., help='Comma-separated scheme names or ids (e.g. "Parag Parikh Flexi Cap Fund,HDFC Defence Fund")'
+    ),
+    refresh_holdings: bool = typer.Option(
+        False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+):
+    """
+    Compare multiple funds side-by-side.
+    """
+    from funds import FundOutput, FundScorer, FundUniverse
+    from funds.scorer import LiveFundamentalScoreProvider, LiveTailwindProvider
+
+    universe = FundUniverse()
+    targets = []
+    for raw in schemes.split(","):
+        q = raw.strip()
+        if not q:
+            continue
+        scheme = universe.find(q)
+        if scheme:
+            targets.append(scheme)
+
+    if len(targets) < 2:
+        console.print("[red]Need at least 2 valid schemes for comparison.[/red]")
+        raise typer.Exit(1)
+
+    scorer = FundScorer(
+        fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
+        tailwind_provider=LiveTailwindProvider(),
+    )
+    analyses = [scorer.analyze(target) for target in targets]
+    FundOutput().display_comparison(analyses)
+
+
+@app.command()
+def theme_funds(
+    theme: str = typer.Argument(..., help="Theme keyword like defense, infra, manufacturing"),
+    top: int = typer.Option(8, "--top", "-n", help="Show top N matching thematic funds"),
+    refresh_holdings: bool = typer.Option(
+        False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+):
+    """
+    Show thematic funds aligned to a specific thesis.
+    """
+    from funds import FundOutput, FundScorer, FundUniverse
+    from funds.scorer import LiveFundamentalScoreProvider, LiveTailwindProvider
+
+    universe = FundUniverse()
+    schemes = universe.filter(strategy_type="thematic", theme=theme)
+    if not schemes:
+        console.print(f"[red]No thematic funds matched theme: {theme}[/red]")
+        raise typer.Exit(1)
+
+    scorer = FundScorer(
+        fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
+        tailwind_provider=LiveTailwindProvider(),
+    )
+    analyses = [scorer.analyze(scheme) for scheme in schemes]
+    analyses.sort(key=lambda a: a.overall_score, reverse=True)
+    FundOutput().display_scan_results(analyses, top_n=top)
+
+
+@app.command()
+def fund_market_extract(
+    output_dir: str = typer.Option(
+        "data/funds_market",
+        "--output-dir",
+        help="Directory to write Groww/Zerodha mutual-fund universe files",
+    ),
+):
+    """
+    Extract the broader mutual-fund market universe from Groww and Zerodha.
+
+    Outputs:
+        - groww_funds.json
+        - zerodha_funds.json
+        - zerodha_mf_instruments.csv
+        - fund_market_union.json
+        - fund_market_union.csv
+        - fund_market_both.json / .csv
+        - fund_market_groww_only.json / .csv
+        - fund_market_zerodha_only.json / .csv
+        - fund_market_summary.json
+    """
+    from funds.market_universe import MarketFundUniverseExtractor
+
+    target = Path(output_dir)
+    console.print("\n[bold cyan]Extracting market mutual-fund universe[/bold cyan]\n")
+    summary = MarketFundUniverseExtractor(output_dir=target).extract(write=True)
+    console.print_json(data=summary)
+    console.print(f"\n[green]Wrote outputs to[/green] {target}")
+
+
+@app.command()
+def fund_review_template(
+    scheme: str = typer.Argument(..., help="Scheme name or identifier"),
+    refresh_holdings: bool = typer.Option(
+        False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+):
+    """
+    Build a structured review template for funds_research.json from the current analysis.
+    """
+    from funds import FundScorer, FundUniverse
+    from funds.research import build_review_template
+    from funds.scorer import LiveFundamentalScoreProvider, LiveTailwindProvider
+
+    universe = FundUniverse()
+    target = universe.find(scheme)
+    if not target:
+        console.print(f"[red]Could not find scheme: {scheme}[/red]")
+        raise typer.Exit(1)
+
+    scorer = FundScorer(
+        fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
+        tailwind_provider=LiveTailwindProvider(),
+    )
+    analysis = scorer.analyze(target)
+    template = build_review_template(analysis)
+    console.print_json(data=template)
+
+
+@app.command()
+def factor_scan(
+    top: int = typer.Option(20, "--top", "-n", help="Show top N stocks"),
+    sector: Optional[str] = typer.Option(None, "--sector", "-s", help="Filter by sector"),
+    factor: Optional[str] = typer.Option(None, "--factor", "-f",
+        help="Sort by: momentum, value, quality, growth, low_vol, composite"),
+    stocks: Optional[str] = typer.Option(None, "--stocks", help="Comma-separated symbols"),
+):
+    """Multi-factor scoring scan (momentum, value, quality, growth, volatility)."""
+    from fundamentals.factor_model import FactorModel
+    from fundamentals.scorer import ProfileBuilder
+    from data.fetcher import StockDataFetcher
+
+    if stocks:
+        symbols = [s.strip().upper() for s in stocks.split(",")]
+    else:
+        from config import get_nifty100_symbols
+        symbols = get_nifty100_symbols()
+
+    if not symbols:
+        console.print("[red]No symbols.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold cyan]Multi-Factor Scan[/bold cyan] ({len(symbols)} stocks)\n")
+
+    fetcher = StockDataFetcher()
+    builder = ProfileBuilder()
+    model = FactorModel()
+
+    stock_data = {}
+    with console.status("[bold green]Fetching data & building profiles...[/bold green]"):
+        for sym in symbols:
+            try:
+                df = fetcher.fetch_stock_data(sym, "daily")
+                if df is None or len(df) < 60:
+                    continue
+                profile = builder.build(sym)
+                if profile and profile.data_quality != "MISSING":
+                    stock_data[sym] = (df, profile)
+            except Exception:
+                continue
+
+    if not stock_data:
+        console.print("[red]No valid data to score.[/red]")
+        raise typer.Exit(1)
+
+    results = model.score_universe(stock_data)
+
+    # Filter by sector
+    if sector:
+        results = [r for r in results if sector.lower() in r.sector.lower()]
+
+    # Sort by specific factor
+    sort_key = factor or 'composite'
+    sort_map = {
+        'momentum': 'momentum_score', 'value': 'value_score',
+        'quality': 'quality_score', 'growth': 'growth_score',
+        'low_vol': 'low_vol_score', 'composite': 'composite_score',
+    }
+    attr = sort_map.get(sort_key, 'composite_score')
+    results.sort(key=lambda r: getattr(r, attr), reverse=True)
+
+    # Display
+    from rich.table import Table
+    table = Table(title=f"Factor Scores (sorted by {sort_key})", show_header=True)
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Symbol", style="bold")
+    table.add_column("Sector", style="dim")
+    table.add_column("Mom", justify="right")
+    table.add_column("Val", justify="right")
+    table.add_column("Qual", justify="right")
+    table.add_column("Grow", justify="right")
+    table.add_column("LowV", justify="right")
+    table.add_column("Composite", justify="right", style="bold cyan")
+
+    for i, r in enumerate(results[:top], 1):
+        table.add_row(
+            str(i), r.symbol, r.sector[:12],
+            f"{r.momentum_score:.0f}", f"{r.value_score:.0f}",
+            f"{r.quality_score:.0f}", f"{r.growth_score:.0f}",
+            f"{r.low_vol_score:.0f}", f"{r.composite_score:.0f}",
+        )
+    console.print(table)
+
+
+@app.command()
+def pipe_scan(
+    strategy: str = typer.Argument("swing_breakout", help="Pipe: swing_breakout, momentum, narrow_range"),
+    top: int = typer.Option(20, "--top", "-n", help="Max results"),
+    stocks: Optional[str] = typer.Option(None, "--stocks", "-s", help="Comma-separated symbols"),
+    all_stocks: bool = typer.Option(False, "--all", help="Use Nifty 500 instead of 100"),
+):
+    """Run a piped scanner with chained filters (funnel report)."""
+    from signals.piped_scanner import PIPE_REGISTRY
+    from data.fetcher import StockDataFetcher
+
+    if strategy not in PIPE_REGISTRY:
+        console.print(f"[red]Unknown pipe: {strategy}. Available: {', '.join(PIPE_REGISTRY.keys())}[/red]")
+        raise typer.Exit(1)
+
+    from config import get_nifty100_symbols, get_nifty500_symbols
+
+    if stocks:
+        symbols = [s.strip().upper() for s in stocks.split(",")]
+    elif all_stocks:
+        symbols = get_nifty500_symbols()
+    else:
+        symbols = get_nifty100_symbols()
+
+    if not symbols:
+        console.print("[red]No symbols to scan.[/red]")
+        raise typer.Exit(1)
+
+    pipe = PIPE_REGISTRY[strategy]()
+    console.print(f"\n[bold cyan]Piped Scanner: {pipe.name}[/bold cyan]")
+    console.print(f"Universe: {len(symbols)} stocks\n")
+
+    fetcher = StockDataFetcher()
+    with console.status("[bold green]Running piped scan...[/bold green]"):
+        report = pipe.run(symbols, fetcher)
+
+    # Display funnel report
+    from rich.table import Table
+
+    funnel = Table(title="Filter Funnel", show_header=True)
+    funnel.add_column("Stage", style="cyan")
+    funnel.add_column("In", justify="right")
+    funnel.add_column("Out", justify="right")
+    funnel.add_column("Eliminated", justify="right", style="red")
+
+    for stage in report.stages:
+        funnel.add_row(
+            stage.name,
+            str(stage.input_count),
+            str(stage.output_count),
+            str(stage.input_count - stage.output_count),
+        )
+    console.print(funnel)
+
+    # Display survivors
+    if report.final_survivors:
+        results_table = Table(title=f"\nSurvivors ({len(report.final_survivors)})", show_header=True)
+        results_table.add_column("#", justify="right", style="dim")
+        results_table.add_column("Symbol", style="bold green")
+        results_table.add_column("Details")
+
+        for i, sym in enumerate(report.final_survivors[:top], 1):
+            detail_str = ", ".join(
+                f"{k}: {v}" for k, v in report.details.get(sym, {}).items()
+            )
+            results_table.add_row(str(i), sym, detail_str)
+        console.print(results_table)
+    else:
+        console.print("\n[yellow]No stocks passed all filters.[/yellow]")
+
+
+@app.command()
+def backtest(
+    strategy: str = typer.Argument("swing", help="Strategy: swing, momentum, mean_reversion"),
+    symbol: str = typer.Option("RELIANCE", "--symbol", "-s", help="Stock symbol"),
+    days: int = typer.Option(1000, "--days", "-d", help="Days of historical data"),
+):
+    """Run walk-forward backtest for a trading strategy."""
+    from backtest.bt_strategies import STRATEGY_REGISTRY, run_backtest
+    from rich.table import Table
+
+    if strategy not in STRATEGY_REGISTRY:
+        console.print(f"[red]Unknown strategy: {strategy}. Available: {', '.join(STRATEGY_REGISTRY.keys())}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold cyan]Walk-Forward Backtest[/bold cyan]")
+    console.print(f"Strategy: {STRATEGY_REGISTRY[strategy]['name']} | Symbol: {symbol} | Days: {days}\n")
+
+    with console.status("[bold green]Running walk-forward backtest...[/bold green]"):
+        result = run_backtest(strategy, symbol, days)
+
+    if isinstance(result, dict) and 'error' in result:
+        console.print(f"[red]{result['error']}[/red]")
+        raise typer.Exit(1)
+
+    # Summary table
+    summary = Table(title="Performance Summary", show_header=True)
+    summary.add_column("Metric", style="cyan")
+    summary.add_column("Value", justify="right")
+
+    summary.add_row("Total Return", f"{result.total_return:+.1f}%")
+    summary.add_row("Annualized Return", f"{result.annualized_return:+.1f}%")
+    summary.add_row("Sharpe Ratio", f"{result.sharpe_ratio:.2f}")
+    summary.add_row("Max Drawdown", f"{result.max_drawdown:.1f}%")
+    summary.add_row("Win Rate", f"{result.win_rate:.1f}%")
+    summary.add_row("Profit Factor", f"{result.profit_factor:.2f}")
+    summary.add_row("Total Trades", str(result.total_trades))
+    console.print(summary)
+
+    # Robustness table
+    robust = Table(title="\nRobustness Metrics", show_header=True)
+    robust.add_column("Metric", style="cyan")
+    robust.add_column("Value", justify="right")
+
+    robust.add_row("Efficiency Ratio", f"{result.avg_efficiency_ratio:.2f}")
+    robust.add_row("Param Stability", f"{result.param_stability:.0f}%")
+    robust.add_row("OOS Degradation", f"{result.degradation_pct:.0f}%")
+    robust.add_row("Robustness Score", f"{result.robustness_score}/100")
+    color = "green" if result.is_robust else "red"
+    robust.add_row("Is Robust", f"[{color}]{'YES' if result.is_robust else 'NO'}[/{color}]")
+    console.print(robust)
+
+    # Per-window table
+    if result.windows:
+        win_table = Table(title="\nPer-Window Results", show_header=True)
+        win_table.add_column("#", justify="right", style="dim")
+        win_table.add_column("IS Return", justify="right")
+        win_table.add_column("OOS Return", justify="right")
+        win_table.add_column("Efficiency", justify="right")
+        win_table.add_column("Trades", justify="right")
+
+        for w in result.windows:
+            oos_color = "green" if w.out_sample_return > 0 else "red"
+            win_table.add_row(
+                str(w.window_id),
+                f"{w.in_sample_return:+.1f}%",
+                f"[{oos_color}]{w.out_sample_return:+.1f}%[/{oos_color}]",
+                f"{w.efficiency_ratio:.2f}",
+                str(w.out_sample_trades),
+            )
+        console.print(win_table)
+
+    if result.warnings:
+        console.print("\n[bold yellow]Warnings:[/bold yellow]")
+        for w in result.warnings:
+            console.print(f"  [yellow]• {w}[/yellow]")
+
+
+@app.command()
+def portfolio_risk(
+    stocks: str = typer.Option(
+        "RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK",
+        "--stocks", "-s",
+        help="Comma-separated symbols (simulated portfolio)"
+    ),
+    capital: float = typer.Option(500000, "--capital", "-c", help="Total capital"),
+):
+    """Portfolio risk analysis: VaR, CVaR, correlations, stress tests."""
+    from data.fetcher import StockDataFetcher
+    from risk.portfolio_risk import PortfolioRiskCalculator
+    from rich.table import Table
+
+    symbols = [s.strip().upper() for s in stocks.split(",")]
+    console.print(f"\n[bold cyan]Portfolio Risk Analysis[/bold cyan] ({len(symbols)} positions)\n")
+
+    fetcher = StockDataFetcher()
+    per_stock_value = capital / len(symbols)
+
+    positions = {}
+    returns_data = {}
+
+    with console.status("[bold green]Fetching price data...[/bold green]"):
+        from config import get_nifty500_stocks
+        all_stocks_info = get_nifty500_stocks()
+        sector_map = {s['symbol']: s.get('sector', 'Unknown') for s in all_stocks_info}
+
+        for sym in symbols:
+            try:
+                df = fetcher.fetch_stock_data(sym, "daily")
+                if df is None or len(df) < 60:
+                    continue
+                ret = df['close'].pct_change().dropna()
+                returns_data[sym] = ret
+                positions[sym] = {
+                    'value': per_stock_value,
+                    'sector': sector_map.get(sym, 'Unknown'),
+                }
+            except Exception:
+                continue
+
+    if not positions:
+        console.print("[red]No valid data.[/red]")
+        raise typer.Exit(1)
+
+    calc = PortfolioRiskCalculator()
+    report = calc.full_report(positions, returns_data)
+
+    # --- VaR Summary ---
+    var_table = Table(title="Value at Risk (95% confidence, 1-day)", show_header=True)
+    var_table.add_column("Metric", style="cyan")
+    var_table.add_column("Undiversified", justify="right")
+    var_table.add_column("Diversified", justify="right", style="green")
+
+    var_table.add_row("VaR %", f"{report.var.var_pct}%", f"{report.diversified_var.var_pct}%")
+    var_table.add_row(
+        "VaR Amount",
+        f"₹{report.var.var_amount:,.0f}",
+        f"₹{report.diversified_var.var_amount:,.0f}",
+    )
+    var_table.add_row("CVaR %", f"{report.var.cvar_pct}%", f"{report.diversified_var.cvar_pct}%")
+    var_table.add_row(
+        "CVaR Amount",
+        f"₹{report.var.cvar_amount:,.0f}",
+        f"₹{report.diversified_var.cvar_amount:,.0f}",
+    )
+    div_benefit = report.var.var_amount - report.diversified_var.var_amount
+    var_table.add_row("Diversification Benefit", "", f"₹{div_benefit:,.0f}")
+    console.print(var_table)
+
+    # --- Individual VaR ---
+    if report.individual_var:
+        ind_table = Table(title="\nIndividual Position VaR", show_header=True)
+        ind_table.add_column("Symbol", style="bold")
+        ind_table.add_column("Value", justify="right")
+        ind_table.add_column("VaR %", justify="right")
+        ind_table.add_column("VaR ₹", justify="right", style="red")
+
+        for sym, v in sorted(report.individual_var.items(), key=lambda x: x[1].var_pct, reverse=True):
+            ind_table.add_row(
+                sym,
+                f"₹{positions[sym]['value']:,.0f}",
+                f"{v.var_pct}%",
+                f"₹{v.var_amount:,.0f}",
+            )
+        console.print(ind_table)
+
+    # --- Correlation ---
+    if report.correlation.high_pairs:
+        corr_table = Table(title="\nHigh Correlation Pairs (>0.7)", show_header=True)
+        corr_table.add_column("Pair", style="yellow")
+        corr_table.add_column("Correlation", justify="right")
+        for a, b, c in report.correlation.high_pairs:
+            corr_table.add_row(f"{a} — {b}", f"{c:.3f}")
+        console.print(corr_table)
+    console.print(f"\n[dim]Average pairwise correlation: {report.correlation.avg_correlation:.3f}[/dim]")
+
+    # --- Stress Tests ---
+    stress_table = Table(title="\nStress Test Scenarios", show_header=True)
+    stress_table.add_column("Scenario", style="cyan")
+    stress_table.add_column("Portfolio Loss %", justify="right", style="red")
+    stress_table.add_column("Portfolio Loss ₹", justify="right", style="red")
+
+    for st in report.stress_tests:
+        stress_table.add_row(
+            st.scenario, f"{st.portfolio_loss_pct}%", f"₹{st.portfolio_loss_amount:,.0f}"
+        )
+    console.print(stress_table)
+
+    # --- Warnings ---
+    if report.warnings:
+        console.print("\n[bold yellow]Warnings:[/bold yellow]")
+        for w in report.warnings:
+            console.print(f"  [yellow]• {w}[/yellow]")
 
 
 def main():

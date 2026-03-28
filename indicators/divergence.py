@@ -160,6 +160,45 @@ class DivergenceDetector:
 
         return False, "", 0
 
+    def detect_rsi_trendline_break(self) -> Tuple[bool, str, int]:
+        """Detect RSI trendline break.
+
+        Draws a trendline between two RSI pivot highs (for downtrend) or
+        two RSI pivot lows (for uptrend).  If the latest RSI crosses above
+        a descending trendline → bullish break.  If it crosses below an
+        ascending trendline → bearish break.
+
+        Returns:
+            (detected, description, score)
+        """
+        latest_rsi = self.df['rsi'].iloc[-1] if pd.notna(self.df['rsi'].iloc[-1]) else None
+        if latest_rsi is None:
+            return False, "", 0
+
+        # Bullish: RSI breaks above a descending trendline
+        # (line connecting two successive lower RSI highs)
+        if len(self.rsi_highs) >= 2:
+            r1, r2 = self.rsi_highs[-2], self.rsi_highs[-1]
+            if r2['value'] < r1['value']:  # descending trendline
+                # Interpolate where the trendline would be NOW
+                slope = (r2['value'] - r1['value']) / max(r2['idx'] - r1['idx'], 1)
+                bars_since_r2 = (len(self.df.tail(30)) - 1) - r2['idx']
+                projected = r2['value'] + slope * bars_since_r2
+                if latest_rsi > projected and projected > 0:
+                    return True, f"RSI broke above descending trendline ({latest_rsi:.0f} > {projected:.0f})", 1
+
+        # Bearish: RSI breaks below an ascending trendline
+        if len(self.rsi_lows) >= 2:
+            r1, r2 = self.rsi_lows[-2], self.rsi_lows[-1]
+            if r2['value'] > r1['value']:  # ascending trendline
+                slope = (r2['value'] - r1['value']) / max(r2['idx'] - r1['idx'], 1)
+                bars_since_r2 = (len(self.df.tail(30)) - 1) - r2['idx']
+                projected = r2['value'] + slope * bars_since_r2
+                if latest_rsi < projected:
+                    return True, f"RSI broke below ascending trendline ({latest_rsi:.0f} < {projected:.0f})", -1
+
+        return False, "", 0
+
     def get_all_divergences(self) -> Dict:
         """Get all detected divergences."""
         patterns = []
@@ -179,6 +218,12 @@ class DivergenceDetector:
 
         # Check hidden divergence
         detected, desc, score = self.detect_hidden_divergence()
+        if detected:
+            patterns.append({'pattern': desc, 'score': score})
+            total_score += score
+
+        # Check RSI trendline break
+        detected, desc, score = self.detect_rsi_trendline_break()
         if detected:
             patterns.append({'pattern': desc, 'score': score})
             total_score += score

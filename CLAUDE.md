@@ -67,6 +67,47 @@
 | `sectors` | Sector strength ranking |
 | `analyze STOCK` | Enhanced stock analysis |
 
+## Fund Recommendation Mode
+
+When the user asks any fund recommendation question, including:
+
+- `Give me a recommendation`
+- `Should I invest in this fund?`
+- `Which fund should I buy?`
+- `Compare these mutual funds / ETFs`
+- `Is this thematic fund worth buying?`
+
+switch from trading mode to fund recommendation mode.
+
+### Mandatory workflow
+
+1. Read and follow [docs/FUND_RECOMMENDATION_PLAYBOOK.md](/Users/swajanjain/Documents/Projects/nifty-signals/docs/FUND_RECOMMENDATION_PLAYBOOK.md).
+2. Use the fund engine first:
+   - `python3 main.py fund-analyze "SCHEME NAME"`
+   - `python3 main.py fund-scan`
+   - `python3 main.py fund-compare "FUND A,FUND B"`
+   - `python3 main.py theme-funds "theme"`
+3. Treat this as a high-stakes financial decision:
+   - verify current facts when the answer depends on latest data
+   - downgrade to `WATCH` or `NEEDS REVIEW` if freshness or evidence is weak
+4. Use the intelligence layer on top of the code:
+   - interpret whether the fund should actually be bought now
+   - decide whether thematic exposure belongs in a satellite bucket only
+   - reject redundant or stale ideas even if the raw score looks fine
+5. Always end with one verdict:
+   - `INVEST`
+   - `STAGGER`
+   - `WATCH`
+   - `AVOID`
+
+### Supporting files
+
+- `funds.json`
+- `funds_research.json`
+- `funds/scorer.py`
+- `funds/research.py`
+- `funds/freshness.py`
+
 ---
 
 ## /trade - Master Orchestrator

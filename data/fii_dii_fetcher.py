@@ -45,6 +45,46 @@ class FIIDIIFetcher:
         self.cache_dir = PROJECT_ROOT / ".cache"
         self.cache_dir.mkdir(exist_ok=True)
 
+    def _fetch_from_jugaad(self) -> Optional[Dict]:
+        """Source 0: jugaad-data NSELive (most reliable for FII/DII)."""
+        try:
+            from jugaad_data.nse import NSELive
+            nse = NSELive()
+            data = nse.fii_dii()
+
+            if not data:
+                return None
+
+            result = {"source": "JUGAAD_DATA", "timestamp": datetime.now().isoformat()}
+
+            # jugaad-data returns a list of dicts with category/buyValue/sellValue/netValue
+            for record in data:
+                category = str(record.get("category", "")).upper()
+                if "FII" in category or "FPI" in category:
+                    result["fii"] = {
+                        "buy": self._parse_number(record.get("buyValue", 0)),
+                        "sell": self._parse_number(record.get("sellValue", 0)),
+                        "net": self._parse_number(record.get("netValue", 0)),
+                        "date": record.get("date"),
+                    }
+                elif "DII" in category:
+                    result["dii"] = {
+                        "buy": self._parse_number(record.get("buyValue", 0)),
+                        "sell": self._parse_number(record.get("sellValue", 0)),
+                        "net": self._parse_number(record.get("netValue", 0)),
+                        "date": record.get("date"),
+                    }
+
+            if "fii" in result:
+                return result
+            return None
+
+        except ImportError:
+            return None
+        except Exception as e:
+            print(f"jugaad-data FII/DII failed: {e}")
+            return None
+
     def fetch_from_nse(self) -> Optional[Dict]:
         """
         Source 1: NSE Direct API
@@ -231,8 +271,9 @@ class FIIDIIFetcher:
         4. Cache
         5. Conservative estimate
         """
-        # Try sources in order
+        # Try sources in order (jugaad-data first — most reliable)
         sources = [
+            ("JUGAAD", self._fetch_from_jugaad),
             ("NSE", self.fetch_from_nse),
             ("SCREENER", self.fetch_from_screener),
             ("MONEYCONTROL", self.fetch_from_moneycontrol),

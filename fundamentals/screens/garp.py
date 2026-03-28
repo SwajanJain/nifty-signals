@@ -85,10 +85,10 @@ class GARPScreen(BaseScreen):
 
         # Hard pass criteria
         passes = (
-            (0 < p.peg_ratio <= 1.5 or p.peg_ratio == 0)
+            0 < p.peg_ratio <= 1.5
             and p.profit_growth_3y >= 15
             and p.roe >= 15
-            and (0 < p.pe_ratio <= 30)
+            and 0 < p.pe_ratio <= 30
         )
 
         return ScreenResult(

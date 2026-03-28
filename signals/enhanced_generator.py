@@ -14,6 +14,11 @@ from indicators.chart_patterns import ChartPatterns
 from indicators.fibonacci import FibonacciAnalysis
 from indicators.divergence import DivergenceDetector
 from indicators.trend_strength import TrendStrength
+from indicators.vcp import VCPScanner
+from indicators.ttm_squeeze import TTMSqueeze
+from indicators.narrow_range import NarrowRangeDetector
+from indicators.cpr import CPRCalculator
+from indicators.bb_patterns import BBPatternDetector
 from indicators.market_regime import RegimeDetector, MarketRegime
 from indicators.multi_timeframe import MultiTimeframeAnalyzer
 from indicators.sector_strength import SectorStrengthAnalyzer, get_sector_for_stock
@@ -49,6 +54,13 @@ class EnhancedSignal(StockSignal):
     trade_setup: Optional[TradeSetup] = None
     position_approved: bool = True
     position_issues: List[str] = field(default_factory=list)
+
+    # Swing pattern signals
+    vcp_signals: Dict = field(default_factory=dict)
+    squeeze_signals: Dict = field(default_factory=dict)
+    narrow_range_signals: Dict = field(default_factory=dict)
+    cpr_signals: Dict = field(default_factory=dict)
+    bb_pattern_signals: Dict = field(default_factory=dict)
 
     # Final recommendation
     final_recommendation: str = ""
@@ -158,6 +170,13 @@ class EnhancedSignalGenerator:
             divergence = DivergenceDetector(daily_df)
             trend_strength = TrendStrength(daily_df)
 
+            # Swing pattern indicators
+            vcp_scanner = VCPScanner(daily_df)
+            ttm_squeeze = TTMSqueeze(daily_df)
+            narrow_range = NarrowRangeDetector(daily_df)
+            cpr_calc = CPRCalculator(daily_df)
+            bb_patterns = BBPatternDetector(daily_df)
+
             # Get all signals
             tech_signals = tech.get_all_signals()
             pa_signals = price_action.get_all_signals()
@@ -166,6 +185,11 @@ class EnhancedSignalGenerator:
             fib_signals = fibonacci.get_all_signals()
             div_signals = divergence.get_all_divergences()
             trend_signals = trend_strength.get_all_signals()
+            vcp_signals = vcp_scanner.get_all_signals()
+            squeeze_signals = ttm_squeeze.get_all_signals()
+            nr_signals = narrow_range.get_all_signals()
+            cpr_signals = cpr_calc.get_all_signals()
+            bb_pat_signals = bb_patterns.get_all_signals()
 
             # Base score
             base_score = (
@@ -175,7 +199,12 @@ class EnhancedSignalGenerator:
                 chart_signals['total_score'] +
                 fib_signals['total_score'] +
                 div_signals['total_score'] +
-                trend_signals['total_score']
+                trend_signals['total_score'] +
+                vcp_signals['total_score'] +
+                squeeze_signals['total_score'] +
+                nr_signals['total_score'] +
+                cpr_signals['total_score'] +
+                bb_pat_signals['total_score']
             )
 
             # Multi-timeframe analysis
@@ -256,6 +285,13 @@ class EnhancedSignalGenerator:
                 sector_strength=sector_data.get('sector_strength', 'UNKNOWN'),
                 sector_bonus=sector_data.get('sector_bonus', 0),
                 is_sector_leader=sector_data.get('is_sector_leader', False),
+
+                # Swing patterns
+                vcp_signals=vcp_signals,
+                squeeze_signals=squeeze_signals,
+                narrow_range_signals=nr_signals,
+                cpr_signals=cpr_signals,
+                bb_pattern_signals=bb_pat_signals,
 
                 # Position
                 trade_setup=trade_setup,

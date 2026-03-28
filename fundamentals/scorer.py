@@ -68,6 +68,7 @@ class ProfileBuilder:
         p.debt_to_equity = health.get('debt_to_equity', 0)
         p.current_ratio = health.get('current_ratio', 0)
         p.interest_coverage = health.get('interest_coverage', 0)
+        p.is_debt_free = health.get('is_debt_free', False)
 
         # --- Cash flow ---
         cf = self._compute_cash_flow(raw)
@@ -110,7 +111,26 @@ class ProfileBuilder:
         p.dividend_growing = consistency.get('div_growing', False)
         p.dividend_payout_ratio = consistency.get('payout_ratio', 0)
 
+        # Reassess data quality based on built profile
+        p.data_quality = self._assess_data_quality(p, raw.data_quality)
+
         return p
+
+    def _assess_data_quality(self, p: FundamentalProfile, raw_quality: str) -> str:
+        """Reassess data quality after profile is built."""
+        if raw_quality == "MISSING":
+            return "MISSING"
+
+        critical_fields = [
+            p.pe_ratio, p.roe, p.roce, p.revenue_growth_3y,
+            p.profit_growth_3y, p.npm, p.eps_ttm,
+        ]
+        critical_zeros = sum(1 for val in critical_fields if val == 0)
+
+        if critical_zeros >= 4:
+            return "PARTIAL"
+
+        return raw_quality
 
     # --- Computation helpers ---
 
@@ -120,7 +140,7 @@ class ProfileBuilder:
         return 0
 
     def _compute_peg(self, pe: float, growth: float) -> float:
-        if pe > 0 and growth > 0:
+        if pe > 0 and growth > 1:
             return round(pe / growth, 2)
         return 0
 
@@ -132,8 +152,20 @@ class ProfileBuilder:
         return 0
 
     def _compute_eps_ttm(self, raw: ScreenerRawData) -> float:
-        """Get TTM EPS from annual P&L."""
-        return self._get_latest_annual_value(raw, 'EPS in Rs') or 0
+        """Get TTM EPS from annual P&L (tries multiple label variants)."""
+        for label in ('EPS in Rs', 'Basic EPS', 'EPS'):
+            val = self._get_latest_annual_value(raw, label)
+            if val is not None and val != 0:
+                return val
+
+        # Fallback: compute from Net Profit and implied shares outstanding
+        net_profit = self._get_latest_annual_value(raw, 'Net Profit')
+        if net_profit and raw.market_cap > 0 and raw.current_price > 0:
+            shares_cr = raw.market_cap / raw.current_price
+            if shares_cr > 0:
+                return round(net_profit / shares_cr, 2)
+
+        return 0
 
     def _compute_ev_ebitda(self, raw: ScreenerRawData) -> float:
         """EV/EBITDA = (Market Cap + Debt - Cash) / EBITDA."""
@@ -192,7 +224,7 @@ class ProfileBuilder:
 
     def _compute_financial_health(self, raw: ScreenerRawData) -> Dict[str, float]:
         """D/E, current ratio, interest coverage from balance sheet and P&L."""
-        result = {'debt_to_equity': 0, 'current_ratio': 0, 'interest_coverage': 0}
+        result = {'debt_to_equity': 0, 'current_ratio': 0, 'interest_coverage': 0, 'is_debt_free': False}
 
         borrowings = self._get_latest_bs_value(raw, 'Borrowings') or 0
         equity = self._get_latest_bs_value(raw, 'Equity Capital') or 0
@@ -208,7 +240,8 @@ class ProfileBuilder:
         if interest > 0:
             result['interest_coverage'] = round(operating_profit / interest, 2)
         elif operating_profit > 0:
-            result['interest_coverage'] = 100  # No interest = very high coverage
+            result['interest_coverage'] = 999  # Sentinel for debt-free
+            result['is_debt_free'] = True
 
         # Current ratio (rough approximation from balance sheet)
         other_assets = self._get_latest_bs_value(raw, 'Other Assets') or 0
@@ -330,25 +363,25 @@ class ProfileBuilder:
         if sales_row:
             vals = self._get_yearly_values(sales_row)
             if len(vals) >= 5:
-                # Latest quarter YoY
-                latest = vals[-1] or 0
-                year_ago = vals[-5] or 0  # 4 quarters back
-                if year_ago > 0:
+                latest = vals[-1]
+                year_ago = vals[-5]
+                if latest is not None and year_ago is not None and year_ago > 0:
                     result['rev_yoy'] = round((latest - year_ago) / year_ago * 100, 1)
 
         if profit_row:
             vals = self._get_yearly_values(profit_row)
             if len(vals) >= 5:
-                latest = vals[-1] or 0
-                year_ago = vals[-5] or 0
-                if year_ago > 0:
+                latest = vals[-1]
+                year_ago = vals[-5]
+                if latest is not None and year_ago is not None and year_ago > 0:
                     result['profit_yoy'] = round((latest - year_ago) / year_ago * 100, 1)
 
                 # Check acceleration: is latest YoY > previous quarter's YoY?
                 if len(vals) >= 6:
-                    prev = vals[-2] or 0
-                    prev_year_ago = vals[-6] or 0
-                    if prev_year_ago > 0 and year_ago > 0:
+                    prev = vals[-2]
+                    prev_year_ago = vals[-6]
+                    if (prev is not None and prev_year_ago is not None
+                            and prev_year_ago > 0 and year_ago > 0):
                         prev_yoy = (prev - prev_year_ago) / prev_year_ago * 100
                         latest_yoy = result['profit_yoy']
                         result['acceleration'] = latest_yoy > prev_yoy
@@ -356,8 +389,10 @@ class ProfileBuilder:
                 # Consecutive quarters of YoY profit growth
                 count = 0
                 for i in range(len(vals) - 1, 3, -1):
-                    curr = vals[i] or 0
-                    yago = vals[i - 4] or 0
+                    curr = vals[i]
+                    yago = vals[i - 4]
+                    if curr is None or yago is None:
+                        break
                     if yago > 0 and curr > yago:
                         count += 1
                     else:
@@ -416,12 +451,15 @@ class ProfileBuilder:
                             npms.append(p / s * 100)
 
                     if len(npms) >= 3:
-                        # Stable = no NPM drop > 3 percentage points
+                        # Stable = no single-period drop > 3pp AND total erosion < 4pp
                         drops = [
                             npms[i] - npms[i - 1]
                             for i in range(1, len(npms))
                         ]
-                        result['npm_stable'] = all(d > -3 for d in drops)
+                        single_period_ok = all(d > -3 for d in drops)
+                        total_erosion = npms[-1] - npms[0]
+                        total_ok = total_erosion > -4
+                        result['npm_stable'] = single_period_ok and total_ok
 
             # No losses
             if profit_row:
@@ -433,17 +471,28 @@ class ProfileBuilder:
             # Dividend
             div_row = self._find_row(raw.annual_pl, 'Dividend Payout')
             if div_row:
-                vals = self._get_yearly_values(div_row)
-                last5 = [v for v in vals[-5:] if v is not None]
-                result['dividend_years'] = sum(1 for v in last5 if v and v > 0)
-                if len(last5) >= 2:
+                div_vals = self._get_yearly_values(div_row)
+                last5_div = [v for v in div_vals[-5:] if v is not None]
+                result['dividend_years'] = sum(1 for v in last5_div if v and v > 0)
+                if len(last5_div) >= 2:
                     result['div_growing'] = all(
-                        last5[i] >= last5[i - 1]
-                        for i in range(1, len(last5))
-                        if last5[i] is not None and last5[i - 1] is not None
+                        last5_div[i] >= last5_div[i - 1]
+                        for i in range(1, len(last5_div))
+                        if last5_div[i] is not None and last5_div[i - 1] is not None
                     )
-                if last5:
-                    result['payout_ratio'] = last5[-1] or 0
+
+                # Compute payout ratio as percentage: (dividend / net_profit) * 100
+                if profit_row and div_vals:
+                    profit_vals_for_div = self._get_yearly_values(profit_row)
+                    min_len = min(len(div_vals), len(profit_vals_for_div))
+                    if min_len > 0:
+                        latest_div = div_vals[-1]
+                        latest_profit = profit_vals_for_div[-1]
+                        if (latest_div is not None and latest_profit is not None
+                                and latest_profit > 0):
+                            result['payout_ratio'] = round(
+                                latest_div / latest_profit * 100, 1
+                            )
 
         return result
 
@@ -711,15 +760,18 @@ class FundamentalScorer:
             score += 3  # Average for banking
 
         # Interest coverage
-        ic = p.interest_coverage
-        if ic >= 10:
-            score += 4
-        elif ic >= 5:
-            score += 3
-        elif ic >= 3:
-            score += 2
-        elif ic >= 1.5:
-            score += 1
+        if p.is_debt_free:
+            score += 4  # Debt-free: full points
+        else:
+            ic = p.interest_coverage
+            if ic >= 10:
+                score += 4
+            elif ic >= 5:
+                score += 3
+            elif ic >= 3:
+                score += 2
+            elif ic >= 1.5:
+                score += 1
 
         # CF positive years (out of 5)
         if p.cash_flow_positive_years >= 5:
@@ -851,7 +903,7 @@ class FundamentalScorer:
             red.append(f"Promoter selling: {p.promoter_holding_change_1y:.1f}%")
         if p.fii_holding_change_1y < -3:
             red.append(f"FII selling: {p.fii_holding_change_1y:.1f}%")
-        if p.interest_coverage > 0 and p.interest_coverage < 2:
+        if not p.is_debt_free and p.interest_coverage > 0 and p.interest_coverage < 2:
             red.append(f"Weak interest coverage: {p.interest_coverage:.1f}x")
         if p.latest_qtr_profit_yoy < -20:
             red.append(f"Quarterly profit down: {p.latest_qtr_profit_yoy:.0f}% YoY")

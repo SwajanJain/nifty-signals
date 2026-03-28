@@ -50,9 +50,6 @@ LOOKBACK_DAYS = 365  # 1 year of data for analysis
 
 DATA_SOURCE = 'yfinance'
 
-# Cache settings
-CACHE_EXPIRY_HOURS = 4  # Cache data for 4 hours
-
 # =============================================================================
 # Data Quality Thresholds
 # =============================================================================
@@ -220,7 +217,7 @@ SCREEN_THRESHOLDS = {
     },
     'dividend': {
         'min_yield': 2.0,
-        'min_years_dividend': 5,
+        'min_years_dividend': 4,
         'min_payout': 20,
         'max_payout': 60,
     },
@@ -321,3 +318,62 @@ BEARISH_KEYWORDS = [
     'headwind', 'slowdown', 'contraction', 'layoff', 'debt concern',
     'default', 'fraud', 'investigation', 'penalty',
 ]
+
+# =============================================================================
+# VCP Scanner Configuration (Minervini)
+# =============================================================================
+VCP_CONFIG = {
+    'min_contractions': 2,
+    'max_base_days': 65,
+    'first_pullback_min_pct': 10,
+    'first_pullback_max_pct': 40,
+    'contraction_ratio': 0.65,       # each pullback < 65% of previous
+    'volume_decline_min': 0.25,      # volume must drop 25%+ across base
+    'pivot_proximity_pct': 5.0,      # within 5% of pivot to score "ready"
+    'swing_window': 5,               # bars on each side for pivot detection
+}
+
+# =============================================================================
+# TTM Squeeze Configuration (John Carter)
+# =============================================================================
+TTM_SQUEEZE_CONFIG = {
+    'bb_length': 20,
+    'bb_mult': 2.0,
+    'kc_length': 20,
+    'kc_mult': 1.5,
+    'min_squeeze_bars': 6,
+    'momentum_lookback': 20,
+}
+
+# =============================================================================
+# Factor Model Configuration (Multi-Factor Investing)
+# =============================================================================
+FACTOR_MODEL_CONFIG = {
+    'weights': {
+        'momentum': 0.25,
+        'value': 0.20,
+        'quality': 0.25,
+        'growth': 0.20,
+        'low_vol': 0.10,
+    },
+}
+
+# =============================================================================
+# Portfolio Risk Configuration
+# =============================================================================
+PORTFOLIO_RISK_CONFIG = {
+    'var_confidence': 0.95,
+    'var_method': 'historical',
+    'max_portfolio_var_pct': 5.0,
+    'correlation_threshold_reduce': 0.7,
+    'correlation_reduce_factor': 0.5,
+}
+
+# =============================================================================
+# Telegram Alerts Configuration
+# =============================================================================
+TELEGRAM_CONFIG = {
+    'enabled': False,
+    'send_on': ['STRONG_BUY', 'BUY'],
+    # Set via env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+}

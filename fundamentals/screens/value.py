@@ -96,7 +96,8 @@ class ValueScreen(BaseScreen):
         # 6. Graham intrinsic value margin of safety
         # Intrinsic Value = EPS × (8.5 + 2 × growth_rate)
         if p.eps_ttm > 0 and p.eps_growth_3y > 0:
-            graham_value = p.eps_ttm * (8.5 + 2 * p.eps_growth_3y)
+            capped_growth = min(p.eps_growth_3y, 20)
+            graham_value = p.eps_ttm * (8.5 + 1.5 * capped_growth)
             margin = (graham_value - p.current_price) / graham_value * 100 if graham_value > 0 else 0
             if margin > 30:
                 met.append(f"Margin of safety {margin:.0f}% (excellent)")

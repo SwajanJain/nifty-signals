@@ -219,6 +219,79 @@ class CandlestickPatterns:
 
         return False, ""
 
+    def detect_v_pattern(self) -> Tuple[bool, str]:
+        """Detect V-Pattern (sharp reversal after steep decline).
+
+        Requires:
+        - 5+ day decline of 8%+ from peak to trough
+        - Sharp reversal: latest close recovers 40%+ of the decline
+        """
+        if len(self.df) < 10:
+            return False, ""
+
+        recent = self.df.tail(15)
+        peak_idx = recent['high'].idxmax()
+        peak = recent.loc[peak_idx, 'high']
+
+        # Find trough AFTER the peak
+        after_peak = recent.loc[peak_idx:]
+        if len(after_peak) < 3:
+            return False, ""
+
+        trough_idx = after_peak['low'].idxmin()
+        trough = after_peak.loc[trough_idx, 'low']
+
+        decline_pct = (peak - trough) / peak * 100 if peak > 0 else 0
+        if decline_pct < 8:
+            return False, ""
+
+        # Check days of decline
+        peak_pos = recent.index.get_loc(peak_idx)
+        trough_pos = recent.index.get_loc(trough_idx)
+        decline_days = trough_pos - peak_pos
+        if decline_days < 3:
+            return False, ""
+
+        # Check recovery from trough
+        after_trough = recent.loc[trough_idx:]
+        if len(after_trough) < 2:
+            return False, ""
+
+        latest_close = self.df['close'].iloc[-1]
+        recovery = (latest_close - trough) / (peak - trough) * 100 if peak > trough else 0
+
+        if recovery >= 40:
+            return True, f"V-Pattern Reversal (declined {decline_pct:.0f}%, recovered {recovery:.0f}%)"
+
+        return False, ""
+
+    def detect_long_legged_doji(self) -> Tuple[bool, str]:
+        """Detect Long-Legged Doji.
+
+        Both upper and lower wicks are very long, body is tiny.
+        Signals extreme indecision — potential reversal point.
+        """
+        latest = self.df.iloc[-1]
+
+        if pd.isna(latest['body_pct']) or latest['range'] == 0:
+            return False, ""
+
+        # Body < 10% of range (doji condition)
+        if latest['body_pct'] >= 0.1:
+            return False, ""
+
+        # Both wicks must be significant (each > 30% of range)
+        upper_pct = latest['upper_wick'] / latest['range']
+        lower_pct = latest['lower_wick'] / latest['range']
+
+        if upper_pct > 0.30 and lower_pct > 0.30:
+            # Must be a wide range day (above average)
+            avg_range = self.df['range'].rolling(20).mean().iloc[-1]
+            if pd.notna(avg_range) and latest['range'] > avg_range * 1.2:
+                return True, "Long-Legged Doji (High indecision, potential reversal)"
+
+        return False, ""
+
     def get_all_patterns(self) -> Dict:
         """Get all detected candlestick patterns."""
         patterns = []
@@ -227,12 +300,14 @@ class CandlestickPatterns:
         # Check each pattern
         checks = [
             self.detect_doji,
+            self.detect_long_legged_doji,
             self.detect_hammer,
             self.detect_shooting_star,
             self.detect_engulfing,
             self.detect_morning_evening_star,
             self.detect_three_soldiers_crows,
             self.detect_marubozu,
+            self.detect_v_pattern,
         ]
 
         for check in checks:

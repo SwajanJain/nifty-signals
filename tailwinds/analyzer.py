@@ -509,11 +509,20 @@ class CompositeAnalyzer:
         tailwind_score: TailwindScore,
         profile: Optional[FundamentalProfile] = None,
     ) -> CompositeScore:
-        """Compute weighted composite score."""
-        valuation_normalized = fundamental_score.valuation_score * 5
+        """Compute weighted composite score.
+
+        Components (each counted exactly once):
+        - Internal (fundamental ex-valuation): 50% weight, normalized 0-80 → 0-100
+        - External (tailwind): 30% weight, already 0-100
+        - Valuation: 20% weight, normalized 0-20 → 0-100
+        """
+        # Separate valuation from other fundamental components to avoid double-counting
+        fundamental_ex_valuation = fundamental_score.total_score - fundamental_score.valuation_score
+        internal_normalized = fundamental_ex_valuation / 80 * 100 if fundamental_ex_valuation > 0 else 0
+        valuation_normalized = fundamental_score.valuation_score * 5  # 0-20 → 0-100
 
         composite = int(round(
-            self.internal_weight * fundamental_score.total_score
+            self.internal_weight * internal_normalized
             + self.external_weight * tailwind_score.total_score
             + self.valuation_weight * valuation_normalized
         ))

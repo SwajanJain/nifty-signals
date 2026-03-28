@@ -107,7 +107,7 @@ class GrowthScreen(BaseScreen):
         passes = (
             p.eps_growth_3y >= 20
             and p.revenue_growth_3y >= 15
-            and (0 < p.peg_ratio <= 1.5 or p.peg_ratio == 0)
+            and 0 < p.peg_ratio <= 1.5
             and p.roe >= 12
         )
 

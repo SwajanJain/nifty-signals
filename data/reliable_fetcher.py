@@ -298,10 +298,8 @@ class ReliableDataFetcher:
     """
     Main data fetcher interface.
 
-    Uses yfinance as the sole data source with:
-    - Symbol mappings for problematic stocks
-    - Data quality assessment
-    - Global market context support
+    Tries NSE (jugaad-data) first, then falls back to yfinance.
+    NSE is faster and more reliable for Indian stocks.
 
     Key Principle: FAIL-CLOSED
     - Unknown/stale data returns DEGRADED quality
@@ -312,10 +310,29 @@ class ReliableDataFetcher:
     def __init__(self):
         self.yfinance = YFinanceFetcher()
         self._yfinance_available = True
+        self._nse = None
+        self._nse_checked = False
+
+    def _get_nse(self):
+        """Lazy-init NSE fetcher. Only try once."""
+        if not self._nse_checked:
+            self._nse_checked = True
+            try:
+                from .nse_fetcher import NSEDataFetcher
+                nse = NSEDataFetcher()
+                if nse.available:
+                    self._nse = nse
+                    logger.info("NSE data source available — using as primary")
+                else:
+                    logger.info("NSE data source unavailable — using yfinance only")
+            except Exception as e:
+                logger.info(f"NSE fetcher init failed: {e}")
+        return self._nse
 
     @property
     def primary_source(self) -> str:
-        return "yfinance"
+        nse = self._get_nse()
+        return "nse" if nse else "yfinance"
 
     def get_historical_data(
         self,
@@ -325,6 +342,8 @@ class ReliableDataFetcher:
         """
         Get historical OHLCV data.
 
+        Tries NSE first (jugaad-data), falls back to yfinance.
+
         Args:
             symbol: Stock symbol (e.g., 'RELIANCE')
             days: Number of days of history
@@ -332,6 +351,14 @@ class ReliableDataFetcher:
         Returns:
             OHLCVData with quality indicator
         """
+        # Try NSE first
+        nse = self._get_nse()
+        if nse:
+            result = nse.get_historical_data(symbol, days)
+            if result and result.is_valid:
+                return result
+
+        # Fall back to yfinance
         return self.yfinance.get_historical_data(symbol, days)
 
     def get_bulk_data(
