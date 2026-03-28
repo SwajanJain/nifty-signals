@@ -1,0 +1,32 @@
+{
+  "_comment": "Signal accuracy tracking - Simons requirement for statistical validation",
+  "last_updated": "2026-01-18T09:00:00",
+  "overall": {
+    "total_signals": 0,
+    "executed": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0,
+    "avg_win_r": 0,
+    "avg_loss_r": 0,
+    "expectancy": 0,
+    "largest_win_r": 0,
+    "largest_loss_r": 0
+  },
+  "by_conviction": {
+    "A+": {"signals": 0, "executed": 0, "wins": 0, "losses": 0, "win_rate": 0},
+    "A": {"signals": 0, "executed": 0, "wins": 0, "losses": 0, "win_rate": 0},
+    "B": {"signals": 0, "executed": 0, "wins": 0, "losses": 0, "win_rate": 0},
+    "C": {"signals": 0, "executed": 0, "wins": 0, "losses": 0, "win_rate": 0}
+  },
+  "by_regime": {
+    "STRONG_BULL": {"signals": 0, "wins": 0, "losses": 0},
+    "BULL": {"signals": 0, "wins": 0, "losses": 0},
+    "NEUTRAL": {"signals": 0, "wins": 0, "losses": 0},
+    "BEAR": {"signals": 0, "wins": 0, "losses": 0},
+    "STRONG_BEAR": {"signals": 0, "wins": 0, "losses": 0}
+  },
+  "by_sector": {},
+  "recent_10_trades": [],
+  "monthly_summary": {}
+}

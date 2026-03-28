@@ -57,6 +57,8 @@ Thumbs.db
 
 # Journal data (keep structure, ignore actual trade data)
 journal/trades.json
+journal/positions.json
+journal/ai_audit.jsonl
 
 # Temporary files
 tmp/

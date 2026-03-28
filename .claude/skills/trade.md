@@ -1,196 +1,87 @@
-# /trade - Master Trading Signal Orchestrator
+# /trade - Deterministic Trading Orchestrator (Claude Orchestrates, Code Decides)
 
-## Architecture
+This skill runs the **artifact-based deterministic pipeline** and then produces a clear, auditable execution plan.
 
-This is the MASTER skill that orchestrates CHILD skills in sequence:
+Claude’s role:
+- **Orchestrator**: run scripts, read JSON artifacts, present results.
+- **Narrator**: explain *why* the system chose the trade (using the artifacts only).
+- **Risk spotter**: optional news/macro checks as **advisory only**.
 
-```
-/trade (Master)
-    │
-    ├── Step 1: Context Layer
-    │   ├── /global → Global market data
-    │   ├── /regime → Market regime
-    │   └── /sectors → Sector strength
-    │
-    ├── Step 2: Signal Layer
-    │   └── Enhanced scan with multi-model ensemble
-    │
-    ├── Step 3: Conviction Layer
-    │   └── Score signals, filter by conviction
-    │
-    └── Step 4: Output
-        └── Final recommendations with full reasoning
-```
-
-## Execution Flow
-
-### Pre-Check
-1. Check if Saturday/Sunday → Market CLOSED
-2. Check if market hours (9:15 AM - 3:30 PM IST)
-3. Check for major holidays
-
-### Step 1: Context Layer (Run in Parallel)
-
-Launch 3 agents using Task tool IN PARALLEL:
-
-**Agent 1 - Global Context:**
-```
-subagent_type: Bash
-prompt: |
-  cd /Users/swajanjain/Documents/Projects/nifty-signals
-  python3 -c "
-  from core.context import MarketContextBuilder
-  builder = MarketContextBuilder()
-  global_data = builder.fetch_global_data()
-  print(f'Risk Score: {global_data.risk_score}')
-  print(f'Sentiment: {global_data.sentiment.value}')
-  print(f'US: S&P {global_data.sp500_change:+.1f}% | VIX {global_data.us_vix:.1f}')
-  print(f'Asia: Nikkei {global_data.nikkei_change:+.1f}%')
-  print(f'Crude: {global_data.crude_change:+.1f}%')
-  "
-Return: Global risk score, sentiment, key market moves
-```
-
-**Agent 2 - Market Regime:**
-```
-subagent_type: Bash
-prompt: cd /Users/swajanjain/Documents/Projects/nifty-signals && python3 main.py regime
-Return: Regime name, should trade, position size multiplier
-```
-
-**Agent 3 - Sector Analysis:**
-```
-subagent_type: Bash
-prompt: cd /Users/swajanjain/Documents/Projects/nifty-signals && python3 main.py sectors
-Return: Top 3 sectors, bottom 3 sectors
-```
-
-### Step 2: Signal Layer
-
-Wait for context. If regime says NO TRADE → Stop and recommend cash.
-
-Otherwise, run enhanced scan:
-```
-subagent_type: Bash
-prompt: cd /Users/swajanjain/Documents/Projects/nifty-signals && python3 main.py enhanced-scan --top 5
-Return: Top 5 actionable signals with conviction levels
-```
-
-### Step 3: News Check
-
-For top 3 signals:
-```
-subagent_type: Explore
-prompt: Search news for [STOCK1], [STOCK2], [STOCK3]. Check:
-- Earnings dates
-- Management changes
-- Analyst ratings
-- Red flags
-Return: News summary, any disqualifiers
-```
-
-### Step 4: Final Output
-
-```markdown
-# Trading Signal - [DATE] [TIME]
-
-## MARKET CONTEXT
-
-### Global
-- Sentiment: [RISK_ON/RISK_OFF/NEUTRAL]
-- Risk Score: [X]/5
-- US: S&P [X]% | VIX [X]
-- Asia: [Summary]
-- Crude: [X]%
-
-### Domestic
-- Regime: [REGIME] (Score: [X])
-- Should Trade: [YES/NO]
-- Position Size: [X]% of normal
-
-### Sectors
-- Focus: [TOP 3]
-- Avoid: [BOTTOM 3]
+Claude **must not** change the trade decision produced by `decision.json`.
 
 ---
 
-## TOP PICK: [SYMBOL] ₹[PRICE]
+## Run (Preferred)
 
-### Decision
-- **Signal:** [STRONG_BUY/BUY]
-- **Conviction:** [A/B/C] ([X]/100)
-- **Confidence:** [HIGH/MEDIUM/LOW]
-
-### Context Alignment
-| Factor | Score | Notes |
-|--------|-------|-------|
-| Technical | [X]/25 | [Key signals] |
-| Confluence | [X]/20 | [X] models agree |
-| Context | [X]/20 | Regime + MTF |
-| Sector | [X]/15 | Rank #[X] |
-| Timing | [X]/10 | [Entry quality] |
-
-### Trade Setup
-| | Value | % |
-|-|-------|---|
-| Entry | ₹[X] | - |
-| Stop Loss | ₹[X] | [X]% |
-| Target 1 | ₹[X] | +[X]% |
-| Target 2 | ₹[X] | +[X]% |
-| R:R | 1:[X] | - |
-
-### Position Sizing
-| | Value |
-|-|-------|
-| Shares | [X] |
-| Value | ₹[X] |
-| Risk | ₹[X] ([X]%) |
-| Portfolio Heat After | [X]% |
-
-### Why This Trade
-1. [Technical reason]
-2. [Context/Sector reason]
-3. [Timing reason]
-
-### Model Votes
-- [✓] Momentum: [REASON]
-- [✓] TrendFollowing: [REASON]
-- [✓] Breakout: [REASON]
-- [ ] MeanReversion: [REASON]
-
----
-
-## ALTERNATIVE: [SYMBOL2]
-Brief: [1-2 line setup]
-
----
-
-## SKIP TODAY
-| Stock | Reason |
-|-------|--------|
-| [X] | [Weak sector/MTF conflict/Low conviction] |
-
----
-
-## RISK FACTORS
-- [Key risk 1]
-- [Key risk 2]
-
----
-
-## AUDIT TRAIL
-- Context fetched: [TIME]
-- Signals generated: [TIME]
-- Decision made: [TIME]
-- Models used: [LIST]
+```bash
+cd /Users/swajanjain/Documents/Projects/nifty-signals
+python3 scripts/run_pipeline.py
 ```
 
-## Key Rules
+This creates: `journal/runs/<run_id>/`
 
-1. **Context First** - Never generate signals without fresh context
-2. **Regime Override** - CRASH/STRONG_BEAR = No trades, recommend cash
-3. **Conviction Threshold** - Skip anything below 40/100
-4. **MTF Required** - Weekly + Daily must align
-5. **Sector Matters** - Avoid bottom 3 sectors
-6. **News Check** - Can veto any technical signal
-7. **Audit Everything** - Every decision has reasoning
+Key outputs:
+- `journal/runs/<run_id>/data_health.json`
+- `journal/runs/<run_id>/symbol_meta.json` (earnings + fundamentals pinned for the run)
+- `journal/runs/<run_id>/internals.json` (market breadth from snapshots)
+- `journal/runs/<run_id>/sector_strength.json` (sector RS/rotation from snapshots)
+- `journal/runs/<run_id>/market_context.json`
+- `journal/runs/<run_id>/candidates.json`
+- `journal/runs/<run_id>/data/daily/*.csv` (OHLCV snapshot used by Stage C/E)
+- `journal/runs/<run_id>/positions_snapshot.json` (portfolio state pinned for the run)
+- `journal/runs/<run_id>/decision.json` (**sacred decision**)
+- `journal/runs/<run_id>/review.json` (run diagnostics: skip reasons, top candidates)
+- `journal/runs/<run_id>/final.md` (code-generated summary)
+- `journal/runs/<run_id>/symbol/*.json` (enrichment for chosen symbol + alternatives)
+
+---
+
+## Capital / Portfolio State (Critical)
+
+- Set capital in `config/trading_config.json` → `portfolio.capital`.
+- The decision stage reads current positions from `journal/positions.json` and snapshots it to `journal/runs/<run_id>/positions_snapshot.json`.
+- If portfolio heat/sector limits are exceeded, the system returns `NO_TRADE`.
+
+---
+
+## Rules (Non-Negotiable)
+
+1. **Decision is code**: the trade is whatever `journal/runs/<run_id>/decision.json` says.
+2. **Fail-closed**: if `data_health.can_proceed=false` or `market_context.should_trade=false`, stop.
+3. **No discretionary overrides**: news/macro checks can only produce an explicit “manual veto advisory”; they do not change `decision.json`.
+
+---
+
+## Claude Output (Use Artifacts Only)
+
+Read:
+- `journal/runs/<run_id>/decision.json`
+- `journal/runs/<run_id>/market_context.json`
+- `journal/runs/<run_id>/data_health.json`
+- `journal/runs/<run_id>/symbol/<SYMBOL>.json` (if present)
+
+Respond in this structure:
+
+1) **Decision**
+- If `NO_TRADE`: quote `decision.reason` and the failing gate(s).
+- If `BUY/STRONG_BUY`: summarize symbol, conviction, entry/stop/targets, shares, risk amount, and portfolio heat (current + projected).
+
+2) **Execution Plan**
+- Use `decision.entry_rules`, `decision.gap_rules`, `decision.stop_rules`, `decision.overnight_rules`.
+- State invalidations (gap rules / chase limit / time window).
+
+3) **Why This Trade (From Data)**
+- Use `decision.reasoning` and the chosen symbol entry in `candidates.json`.
+
+4) **Alternatives**
+- Use `decision.alternatives` (do not invent symbols).
+
+5) **Advisory Checks (Optional)**
+- You may run `/news <SYMBOL>` and `/macro` for context, but treat this as commentary only.
+
+---
+
+## Safety Notes
+
+- This system is designed for **repeatability and auditability**: same run artifacts ⇒ same `decision.json`.
+- Execution and updating `journal/positions.json` is outside this pipeline.

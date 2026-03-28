@@ -1,0 +1,14 @@
+{
+  "_comment": "Open positions tracking - Claude Code reads this for context",
+  "last_updated": "2026-01-18T09:00:00",
+  "open_positions": [],
+  "portfolio_summary": {
+    "total_positions": 0,
+    "total_value": 0,
+    "portfolio_heat_pct": 0,
+    "available_risk_pct": 6.0,
+    "capital": 1000000
+  },
+  "sector_exposure": {},
+  "recent_closed": []
+}

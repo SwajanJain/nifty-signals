@@ -1,6 +1,14 @@
-"""ATR-based Position Sizing and Risk Management."""
+"""
+Legendary Trader Position Sizing and Risk Management.
 
-from typing import Dict, List, Optional
+Implements stop/target strategies inspired by:
+- Mark Minervini: Structure-based stops using pivot lows
+- William O'Neil: Max 8% loss cap
+- Paul Tudor Jones: Regime-aware ATR multipliers
+- Ed Seykota: Wide trailing stops for trend capture
+"""
+
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
@@ -15,6 +23,7 @@ class TradeSetup:
     stop_loss: float
     target_1: float
     target_2: float
+    target_3: Optional[float]  # Added T3 for runners
     position_size: int
     position_value: float
     risk_amount: float
@@ -22,6 +31,7 @@ class TradeSetup:
     reward_risk_ratio: float
     atr: float
     atr_multiple_sl: float
+    stop_type: str  # "ATR", "PIVOT", "EMA", "HYBRID"
 
 
 class PositionSizer:
@@ -52,6 +62,148 @@ class PositionSizer:
         """Calculate Average True Range."""
         atr = ta.atr(df['high'], df['low'], df['close'], length=self.atr_period)
         return atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else 0
+
+    def find_pivot_low(self, df: pd.DataFrame, lookback: int = 20) -> float:
+        """
+        Find the most recent pivot low (Minervini-style structure stop).
+
+        A pivot low is a bar with lower lows on both sides.
+        """
+        if len(df) < lookback:
+            return df['low'].min()
+
+        recent = df.tail(lookback)
+        lows = recent['low'].values
+
+        # Find pivot lows (local minima)
+        pivot_lows = []
+        for i in range(2, len(lows) - 2):
+            if lows[i] < lows[i-1] and lows[i] < lows[i-2] and \
+               lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+                pivot_lows.append(lows[i])
+
+        if pivot_lows:
+            # Return the most recent pivot low
+            return pivot_lows[-1]
+
+        # Fallback to lowest low in last 10 bars
+        return df['low'].tail(10).min()
+
+    def get_ema_support(self, df: pd.DataFrame, ema_period: int = 20) -> float:
+        """
+        Get EMA as dynamic support level.
+
+        Used as secondary stop reference - if price closes below EMA,
+        the trade thesis is invalidated.
+        """
+        ema = ta.ema(df['close'], length=ema_period)
+        if ema is not None and not pd.isna(ema.iloc[-1]):
+            return ema.iloc[-1]
+        return 0
+
+    def get_regime_atr_multiplier(self, vix: float = 15.0) -> float:
+        """
+        Paul Tudor Jones style - adjust ATR multiplier based on volatility regime.
+
+        Higher VIX = wider stops to avoid noise
+        Lower VIX = tighter stops for better risk management
+        """
+        if vix > 25:
+            return 3.0  # High volatility - wide stops
+        elif vix > 18:
+            return 2.5  # Elevated volatility
+        elif vix > 12:
+            return 2.0  # Normal volatility
+        else:
+            return 1.5  # Low volatility - tight stops
+
+    def calculate_structure_stop(
+        self,
+        df: pd.DataFrame,
+        entry_price: float,
+        vix: float = 15.0,
+        is_long: bool = True
+    ) -> Tuple[float, str]:
+        """
+        Calculate stop loss using multiple structure methods (Minervini + O'Neil + PTJ).
+
+        Uses the HIGHEST of:
+        1. ATR-based stop (regime-adjusted)
+        2. Pivot low stop (structure-based)
+        3. EMA support stop
+
+        Capped by O'Neil's max 8% rule.
+
+        Returns:
+            Tuple of (stop_price, stop_type)
+        """
+        atr = self.calculate_atr(df)
+        atr_mult = self.get_regime_atr_multiplier(vix)
+
+        # Method 1: ATR-based stop
+        if is_long:
+            atr_stop = entry_price - (atr * atr_mult)
+        else:
+            atr_stop = entry_price + (atr * atr_mult)
+
+        # Method 2: Pivot low stop (structure)
+        pivot_low = self.find_pivot_low(df)
+        # Add small buffer below pivot
+        pivot_stop = pivot_low * 0.995 if is_long else pivot_low * 1.005
+
+        # Method 3: EMA support stop
+        ema_20 = self.get_ema_support(df, 20)
+        # Stop just below EMA
+        ema_stop = ema_20 * 0.98 if is_long else ema_20 * 1.02
+
+        # O'Neil's max 8% loss cap
+        max_loss_stop = entry_price * 0.92 if is_long else entry_price * 1.08
+
+        if is_long:
+            # For longs, use highest stop (least risk)
+            stops = {
+                'ATR': atr_stop,
+                'PIVOT': pivot_stop,
+                'EMA': ema_stop
+            }
+
+            # Filter out stops that are too far (more than 10% away)
+            valid_stops = {k: v for k, v in stops.items() if v > entry_price * 0.90}
+
+            if valid_stops:
+                # Use the highest (tightest) valid stop
+                stop_type = max(valid_stops, key=valid_stops.get)
+                best_stop = valid_stops[stop_type]
+            else:
+                stop_type = 'ATR'
+                best_stop = atr_stop
+
+            # Apply O'Neil cap - never lose more than 8%
+            final_stop = max(best_stop, max_loss_stop)
+            if final_stop == max_loss_stop and best_stop < max_loss_stop:
+                stop_type = 'MAX_LOSS'
+        else:
+            # For shorts, use lowest stop (least risk)
+            stops = {
+                'ATR': atr_stop,
+                'PIVOT': pivot_stop,
+                'EMA': ema_stop
+            }
+
+            valid_stops = {k: v for k, v in stops.items() if v < entry_price * 1.10}
+
+            if valid_stops:
+                stop_type = min(valid_stops, key=valid_stops.get)
+                best_stop = valid_stops[stop_type]
+            else:
+                stop_type = 'ATR'
+                best_stop = atr_stop
+
+            final_stop = min(best_stop, max_loss_stop)
+            if final_stop == max_loss_stop and best_stop > max_loss_stop:
+                stop_type = 'MAX_LOSS'
+
+        return round(final_stop, 2), stop_type
 
     def calculate_atr_stop(
         self,
@@ -144,18 +296,27 @@ class PositionSizer:
         self,
         entry_price: float,
         stop_loss: float,
-        risk_reward_1: float = 1.5,
-        risk_reward_2: float = 2.5,
+        risk_reward_1: float = 2.0,  # Seykota: wider first target
+        risk_reward_2: float = 4.0,  # Seykota: much wider second target
+        risk_reward_3: float = 8.0,  # Seykota: let runners run
         is_long: bool = True
     ) -> Dict:
         """
-        Calculate profit targets based on risk-reward.
+        Calculate profit targets - Ed Seykota style.
+
+        Seykota philosophy: "Cut losses short, let winners run"
+        - T1 at 2R: Exit 25% - lock in small profit
+        - T2 at 4R: Exit 25% - capture trend continuation
+        - T3 at 8R: For the remaining 50% that trails
+
+        This allows capturing 10-20R moves that make trading profitable.
 
         Args:
             entry_price: Entry price
             stop_loss: Stop loss price
-            risk_reward_1: R:R for first target
-            risk_reward_2: R:R for second target
+            risk_reward_1: R:R for first target (default 2.0)
+            risk_reward_2: R:R for second target (default 4.0)
+            risk_reward_3: R:R for third target (default 8.0)
             is_long: True for long trades
 
         Returns:
@@ -166,16 +327,25 @@ class PositionSizer:
         if is_long:
             target_1 = entry_price + (risk * risk_reward_1)
             target_2 = entry_price + (risk * risk_reward_2)
+            target_3 = entry_price + (risk * risk_reward_3)
         else:
             target_1 = entry_price - (risk * risk_reward_1)
             target_2 = entry_price - (risk * risk_reward_2)
+            target_3 = entry_price - (risk * risk_reward_3)
 
         return {
             'target_1': round(target_1, 2),
             'target_2': round(target_2, 2),
+            'target_3': round(target_3, 2),
             'risk_reward_1': risk_reward_1,
             'risk_reward_2': risk_reward_2,
-            'risk_amount': round(risk, 2)
+            'risk_reward_3': risk_reward_3,
+            'risk_amount': round(risk, 2),
+            'exit_plan': {
+                'at_t1': 25,  # Exit 25% at T1
+                'at_t2': 25,  # Exit 25% at T2
+                'trail': 50   # Trail 50% with wide stop
+            }
         }
 
     def create_trade_setup(
@@ -186,18 +356,28 @@ class PositionSizer:
         stop_loss: Optional[float] = None,
         atr_multiplier: float = 2.0,
         regime_multiplier: float = 1.0,
+        vix: float = 15.0,
+        use_structure_stop: bool = True,
         custom_targets: Optional[Dict] = None
     ) -> TradeSetup:
         """
         Create complete trade setup with position sizing.
 
+        Legendary Trader Edition:
+        - Minervini: Structure-based stops (pivot lows)
+        - O'Neil: Max 8% loss cap
+        - PTJ: Regime-aware ATR multipliers
+        - Seykota: Wide targets (2R, 4R, 8R) with 25/25/50 exit plan
+
         Args:
             symbol: Stock symbol
             df: OHLCV DataFrame
             entry_price: Entry price (defaults to current close)
-            stop_loss: Stop loss (defaults to ATR-based)
-            atr_multiplier: ATR multiplier for stop
+            stop_loss: Stop loss (defaults to structure-based)
+            atr_multiplier: ATR multiplier for stop (fallback)
             regime_multiplier: Position size adjustment for regime
+            vix: Current VIX level for regime-aware stops
+            use_structure_stop: Use multi-method structure stop (recommended)
             custom_targets: Custom target prices
 
         Returns:
@@ -210,23 +390,33 @@ class PositionSizer:
         # Calculate ATR
         atr = self.calculate_atr(df)
 
-        # Default stop to ATR-based
+        # Calculate stop loss
+        stop_type = "ATR"
         if stop_loss is None:
-            stop_loss = self.calculate_atr_stop(df, entry_price, atr_multiplier)
+            if use_structure_stop:
+                # Use legendary trader multi-method stop
+                stop_loss, stop_type = self.calculate_structure_stop(
+                    df, entry_price, vix, is_long=True
+                )
+            else:
+                # Fallback to simple ATR stop
+                stop_loss = self.calculate_atr_stop(df, entry_price, atr_multiplier)
 
         # Calculate position size
         sizing = self.calculate_position_size(entry_price, stop_loss, regime_multiplier)
 
-        # Calculate targets
+        # Calculate targets (Seykota style: 2R, 4R, 8R)
         if custom_targets:
             target_1 = custom_targets.get('target_1', entry_price * 1.05)
             target_2 = custom_targets.get('target_2', entry_price * 1.10)
+            target_3 = custom_targets.get('target_3', entry_price * 1.20)
         else:
             targets = self.calculate_targets(entry_price, stop_loss)
             target_1 = targets['target_1']
             target_2 = targets['target_2']
+            target_3 = targets['target_3']
 
-        # Calculate R:R
+        # Calculate R:R (using T1 for standard comparison)
         risk = abs(entry_price - stop_loss)
         reward = abs(target_1 - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
@@ -237,13 +427,15 @@ class PositionSizer:
             stop_loss=round(stop_loss, 2),
             target_1=round(target_1, 2),
             target_2=round(target_2, 2),
+            target_3=round(target_3, 2),
             position_size=sizing['shares'],
             position_value=sizing['position_value'],
             risk_amount=sizing['risk_amount'],
             risk_percent=sizing['risk_percent'],
             reward_risk_ratio=round(rr_ratio, 2),
             atr=round(atr, 2),
-            atr_multiple_sl=atr_multiplier
+            atr_multiple_sl=atr_multiplier,
+            stop_type=stop_type
         )
 
 

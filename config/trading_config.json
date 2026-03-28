@@ -1,0 +1,151 @@
+{
+  "version": "1.0.0",
+  "description": "Trading system configuration - all thresholds pinned for reproducibility",
+
+  "portfolio": {
+    "capital": 1000000
+  },
+
+  "conviction": {
+    "min_for_trade": 40,
+    "grades": {
+      "A+": {"min": 85, "risk_pct": 2.5},
+      "A": {"min": 70, "risk_pct": 2.0},
+      "B": {"min": 55, "risk_pct": 1.0},
+      "C": {"min": 40, "risk_pct": 0.5}
+    }
+  },
+
+  "risk_limits": {
+    "max_portfolio_heat_pct": 6.0,
+    "max_single_position_pct": 15.0,
+    "max_sector_exposure_pct": 30.0,
+    "max_correlated_positions": 3,
+    "min_liquidity_cr": 10.0
+  },
+
+  "regime_multipliers": {
+    "STRONG_BULL": 1.0,
+    "BULL": 0.8,
+    "NEUTRAL": 0.5,
+    "BEAR": 0.3,
+    "STRONG_BEAR": 0.2,
+    "CRASH": 0.0
+  },
+
+  "execution_rules": {
+    "min_net_rr": 1.5,
+    "watchlist_top_n": 5,
+    "gap_up_max_pct": 2.0,
+    "gap_down_max_pct": 3.0,
+    "chase_limit_pct": 1.0,
+    "entry_valid_until_hours": 2.0,
+    "overnight_gap_assumption_pct": 5.0
+  },
+
+  "execution_costs": {
+    "round_trip_bps": 15,
+    "slippage_bps": 10
+  },
+
+  "data_quality": {
+    "max_stale_days": 2,
+    "min_bars_required": 200,
+    "earnings_blackout_days": 3
+  },
+
+  "symbol_meta": {
+    "cache_max_age_days": 7
+  },
+
+  "event_risk": {
+    "earnings_blackout_days": 3,
+    "earnings_reduce_days": 7,
+    "earnings_caution_days": 14,
+    "unknown_earnings_multiplier": 0.7
+  },
+
+  "fundamentals": {
+    "enabled": true,
+    "unknown_multiplier": 0.8,
+    "grade_multipliers": {
+      "A": 1.0,
+      "B": 0.9,
+      "C": 0.7,
+      "D": 0.0
+    },
+    "thresholds": {
+      "roe_good": 0.1,
+      "roe_bad": 0.05,
+      "de_ratio_good": 100.0,
+      "de_ratio_bad": 250.0,
+      "margin_good": 0.08,
+      "margin_bad": 0.03
+    }
+  },
+
+  "kill_switches": {
+    "vix_max": 35,
+    "regime_no_trade": ["CRASH"],
+    "data_stale_action": "NO_TRADE",
+    "portfolio_heat_exceeded_action": "NO_TRADE"
+  },
+
+  "model_weights": {
+    "momentum": 0.25,
+    "trend": 0.25,
+    "breakout": 0.25,
+    "mean_reversion": 0.25
+  },
+
+  "technical_params": {
+    "rsi_period": 14,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
+    "ema_fast": 20,
+    "ema_medium": 50,
+    "ema_slow": 200,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "atr_period": 14,
+    "stop_atr_multiplier": 2.0,
+    "target1_atr_multiplier": 4.0,
+    "target2_atr_multiplier": 8.0
+  },
+
+  "legendary_stops": {
+    "_comment": "Inspired by Minervini, O'Neil, PTJ, Seykota",
+    "use_structure_stop": true,
+    "stop_methods": ["ATR", "PIVOT", "EMA"],
+    "max_loss_pct": 8.0,
+    "pivot_lookback": 20,
+    "ema_buffer_pct": 2.0,
+    "vix_atr_multipliers": {
+      "high_vix_25+": 3.0,
+      "elevated_vix_18-25": 2.5,
+      "normal_vix_12-18": 2.0,
+      "low_vix_<12": 1.5
+    }
+  },
+
+  "legendary_targets": {
+    "_comment": "Ed Seykota: Cut losses short, let winners run",
+    "target1_r": 2.0,
+    "target2_r": 4.0,
+    "target3_r": 8.0,
+    "exit_at_t1_pct": 25,
+    "exit_at_t2_pct": 25,
+    "trail_pct": 50
+  },
+
+  "legendary_exits": {
+    "_comment": "Livermore: Big money is made in the sitting",
+    "no_max_hold_for_winners": true,
+    "time_stop_days_losers": 10,
+    "winner_threshold_r": 1.0,
+    "trailing_start_r": 1.5,
+    "trailing_atr_multiple": 3.0,
+    "opportunity_cost_exit": true
+  }
+}

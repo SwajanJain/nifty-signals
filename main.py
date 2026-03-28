@@ -425,6 +425,528 @@ def analyze_enhanced(
     console.print(report)
 
 
+@app.command()
+def reddit(
+    limit: int = typer.Option(
+        25,
+        "--limit", "-l",
+        help="Posts per subreddit per sort mode (default: 25)"
+    ),
+    comments: bool = typer.Option(
+        False,
+        "--comments",
+        help="Also fetch comments for top budget posts (slower)"
+    ),
+    cached: bool = typer.Option(
+        False,
+        "--cached",
+        help="Use cached results if available"
+    ),
+):
+    """
+    Fetch Reddit sentiment from Indian investment subreddits.
+
+    Analyzes posts from r/IndiaInvestments, r/IndianStreetBets,
+    r/IndianStockMarket for budget discussions, stock mentions,
+    and sector sentiment.
+
+    Examples:
+        python main.py reddit
+        python main.py reddit --comments --limit 50
+        python main.py reddit --cached
+    """
+    from data.reddit_fetcher import RedditFetcher, format_reddit_report
+
+    console.print(f"\n[bold cyan]Reddit Sentiment Agent[/bold cyan]\n")
+
+    fetcher = RedditFetcher()
+
+    if cached:
+        cached_data = fetcher.load_cache()
+        if cached_data:
+            console.print("[dim]Using cached results[/dim]\n")
+            report = format_reddit_report(cached_data)
+            console.print(report)
+            return
+        console.print("[yellow]No cache found, fetching fresh data...[/yellow]\n")
+
+    analysis = fetcher.fetch_and_analyze(
+        limit_per_sub=limit,
+        fetch_comments=comments,
+    )
+    report = format_reddit_report(analysis)
+    console.print(report)
+
+    console.print(f"\n[dim]Results cached to .cache/reddit_posts.json[/dim]")
+
+
+# =============================================================================
+# Fundamental Analysis Commands
+# =============================================================================
+
+
+@app.command()
+def fundamental_scan(
+    top: int = typer.Option(20, "--top", "-n", help="Show top N stocks"),
+    sector: Optional[str] = typer.Option(
+        None, "--sector", "-s", help="Filter by sector"
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh data from screener.in"
+    ),
+    min_score: int = typer.Option(0, "--min-score", help="Minimum fundamental score"),
+):
+    """
+    Full Nifty 500 fundamental scan with composite scoring.
+
+    Fetches data from screener.in, computes fundamental scores,
+    and ranks stocks by overall fundamental quality.
+
+    Examples:
+        python main.py fundamental-scan
+        python main.py fundamental-scan --top 10 --sector IT
+        python main.py fundamental-scan --refresh --min-score 60
+    """
+    from config import get_nifty500_stocks
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder, FundamentalScorer
+    from fundamentals.output import FundamentalOutput
+
+    console.print("\n[bold cyan]Fundamental Scan - Nifty 500[/bold cyan]\n")
+
+    stocks = get_nifty500_stocks()
+    if not stocks:
+        console.print("[red]No Nifty 500 stocks found in stocks.json[/red]")
+        raise typer.Exit(1)
+
+    symbols = [s['symbol'] for s in stocks]
+    if sector:
+        symbols = [
+            s['symbol'] for s in stocks
+            if s.get('sector', '').lower() == sector.lower()
+        ]
+        console.print(f"Filtering by sector: {sector} ({len(symbols)} stocks)\n")
+
+    # Fetch data
+    fetcher = ScreenerFetcher()
+    raw_data = fetcher.fetch_batch(symbols, force_refresh=refresh)
+
+    if not raw_data:
+        console.print("[red]No fundamental data fetched. Check your connection.[/red]")
+        raise typer.Exit(1)
+
+    # Build profiles and score
+    builder = ProfileBuilder()
+    scorer = FundamentalScorer()
+    profiles = {}
+    scores = []
+
+    for symbol, raw in raw_data.items():
+        profile = builder.build(raw)
+        fs = scorer.score(profile)
+        if fs.total_score >= min_score:
+            profiles[symbol] = profile
+            scores.append(fs)
+
+    # Sort by score
+    scores.sort(key=lambda s: s.total_score, reverse=True)
+
+    # Display
+    output = FundamentalOutput()
+    output.display_scan_results(scores, profiles, top_n=top)
+
+    console.print(f"\n[dim]Total: {len(scores)} stocks scored | Showing top {min(top, len(scores))}[/dim]")
+
+
+@app.command()
+def fundamental_analyze(
+    symbol: str = typer.Argument(..., help="Stock symbol (e.g., RELIANCE)"),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh data from screener.in"
+    ),
+):
+    """
+    Deep fundamental analysis of a single stock.
+
+    Fetches comprehensive financial data from screener.in and provides
+    detailed scoring, valuation, profitability, growth, and quality analysis.
+
+    Examples:
+        python main.py fundamental-analyze RELIANCE
+        python main.py fundamental-analyze TCS --refresh
+    """
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder, FundamentalScorer
+    from fundamentals.screens import SCREENS
+    from fundamentals.output import FundamentalOutput
+
+    symbol = symbol.upper()
+    console.print(f"\n[bold cyan]Fundamental Analysis: {symbol}[/bold cyan]\n")
+
+    # Fetch
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol, force_refresh=refresh)
+
+    if not raw:
+        console.print(f"[red]Could not fetch data for {symbol}.[/red]")
+        raise typer.Exit(1)
+
+    # Build profile and score
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+
+    scorer = FundamentalScorer()
+    fs = scorer.score(profile)
+
+    # Check which strategies match
+    for name, screen_cls in SCREENS.items():
+        screen = screen_cls()
+        result = screen.screen(profile)
+        setattr(fs, f'matches_{name}', result.passes)
+
+    # Display
+    output = FundamentalOutput()
+    output.display_stock_analysis(profile, fs)
+
+
+@app.command()
+def screen(
+    strategy: str = typer.Argument(
+        ..., help="Strategy: value, growth, quality, garp, dividend"
+    ),
+    top: int = typer.Option(20, "--top", "-n", help="Show top N matches"),
+    sector: Optional[str] = typer.Option(
+        None, "--sector", help="Filter by sector"
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh data from screener.in"
+    ),
+):
+    """
+    Run a specific fundamental screening strategy on Nifty 500.
+
+    Available strategies: value, growth, quality, garp, dividend
+
+    Examples:
+        python main.py screen value
+        python main.py screen growth --top 10
+        python main.py screen quality --sector IT
+    """
+    from config import get_nifty500_stocks
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder
+    from fundamentals.screens import get_screen
+    from fundamentals.output import FundamentalOutput
+
+    console.print(f"\n[bold cyan]{strategy.upper()} Screen - Nifty 500[/bold cyan]\n")
+
+    try:
+        screen_instance = get_screen(strategy)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[dim]{screen_instance.description}[/dim]\n")
+
+    # Load stocks
+    stocks = get_nifty500_stocks()
+    if not stocks:
+        console.print("[red]No Nifty 500 stocks found in stocks.json[/red]")
+        raise typer.Exit(1)
+
+    symbols = [s['symbol'] for s in stocks]
+    if sector:
+        symbols = [
+            s['symbol'] for s in stocks
+            if s.get('sector', '').lower() == sector.lower()
+        ]
+        console.print(f"Filtering by sector: {sector} ({len(symbols)} stocks)\n")
+
+    # Fetch data
+    fetcher = ScreenerFetcher()
+    raw_data = fetcher.fetch_batch(symbols, force_refresh=refresh)
+
+    # Build profiles
+    builder = ProfileBuilder()
+    profiles = {}
+    for symbol_key, raw in raw_data.items():
+        profiles[symbol_key] = builder.build(raw)
+
+    # Run screen
+    results = screen_instance.screen_batch(profiles)
+
+    # Display
+    output = FundamentalOutput()
+    output.display_screen_results(results[:top], strategy)
+
+    console.print(f"\n[dim]{len(results)} stocks passed out of {len(profiles)} analyzed[/dim]")
+
+
+@app.command()
+def fundamental_compare(
+    symbols: str = typer.Argument(
+        ..., help="Comma-separated symbols (e.g., TCS,INFY,WIPRO)"
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh data from screener.in"
+    ),
+):
+    """
+    Compare fundamentals of 2+ stocks side-by-side.
+
+    Examples:
+        python main.py fundamental-compare TCS,INFY,WIPRO
+        python main.py fundamental-compare HDFCBANK,ICICIBANK,KOTAKBANK
+    """
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder, FundamentalScorer
+    from fundamentals.output import FundamentalOutput
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    if len(symbol_list) < 2:
+        console.print("[red]Please provide at least 2 symbols separated by commas.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[bold cyan]Fundamental Comparison: {', '.join(symbol_list)}[/bold cyan]\n")
+
+    fetcher = ScreenerFetcher()
+    builder = ProfileBuilder()
+    scorer = FundamentalScorer()
+
+    profiles = []
+    scores = []
+
+    for sym in symbol_list:
+        raw = fetcher.fetch_stock(sym, force_refresh=refresh)
+        if not raw:
+            console.print(f"[yellow]Could not fetch {sym}, skipping.[/yellow]")
+            continue
+
+        profile = builder.build(raw)
+        fs = scorer.score(profile)
+        profiles.append(profile)
+        scores.append(fs)
+
+    if len(profiles) < 2:
+        console.print("[red]Need at least 2 stocks for comparison.[/red]")
+        raise typer.Exit(1)
+
+    output = FundamentalOutput()
+    output.display_comparison(profiles, scores)
+
+
+# =============================================================================
+# Tailwind / External Factors Commands
+# =============================================================================
+
+
+@app.command()
+def tailwinds(
+    sector: Optional[str] = typer.Option(
+        None, "--sector", "-s", help="Deep dive into a specific sector"
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh news data"
+    ),
+):
+    """
+    Show macro themes and sector tailwind analysis.
+
+    Analyzes external factors: government policies, demand shifts,
+    global trends, commodity cycles, and their impact on sectors.
+
+    Examples:
+        python main.py tailwinds
+        python main.py tailwinds --sector IT
+        python main.py tailwinds --refresh
+    """
+    from tailwinds.registry import ThemeRegistry
+    from tailwinds.analyzer import TailwindAnalyzer
+    from tailwinds.news_fetcher import NewsFetcher
+    from tailwinds.output import TailwindOutput
+
+    console.print("\n[bold cyan]Tailwind Analysis - External Factors[/bold cyan]\n")
+
+    registry = ThemeRegistry()
+    fetcher = NewsFetcher()
+    analyzer = TailwindAnalyzer(registry=registry, fetcher=fetcher)
+    output = TailwindOutput()
+
+    if sector:
+        # Sector deep dive
+        console.print(f"Analyzing tailwinds for [bold]{sector}[/bold]...\n")
+        sector_result = analyzer.analyze_sector(sector)
+        news_items = fetcher.fetch_all(force_refresh=refresh)
+        sector_news = fetcher.get_sector_news(news_items, sector)
+        output.display_sector_deep_dive(sector_result, sector_news)
+    else:
+        # Show all themes + sector rankings
+        themes = registry.get_active_themes()
+        output.display_themes(themes)
+
+        console.print()
+        sector_scores = analyzer.analyze_all_sectors(force_refresh=refresh)
+        output.display_sector_scores(sector_scores)
+
+        # Summary
+        tailwind_sectors = [s for s, st in sector_scores.items() if st.total_score >= 60]
+        headwind_sectors = [s for s, st in sector_scores.items() if st.total_score < 40]
+
+        if tailwind_sectors:
+            console.print(f"\n[green]Tailwind sectors:[/green] {', '.join(tailwind_sectors)}")
+        if headwind_sectors:
+            console.print(f"[red]Headwind sectors:[/red] {', '.join(headwind_sectors)}")
+
+
+@app.command()
+def full_analyze(
+    symbol: str = typer.Argument(..., help="Stock symbol (e.g., RELIANCE)"),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh all data"
+    ),
+):
+    """
+    Combined fundamental + tailwind analysis for a single stock.
+
+    Shows internal quality score, external environment score,
+    and blended composite score.
+
+    Examples:
+        python main.py full-analyze RELIANCE
+        python main.py full-analyze TCS --refresh
+    """
+    from config import get_nifty500_stocks
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder, FundamentalScorer
+    from fundamentals.screens import SCREENS
+    from fundamentals.output import FundamentalOutput
+    from tailwinds.analyzer import TailwindAnalyzer, CompositeAnalyzer
+    from tailwinds.output import TailwindOutput
+
+    symbol = symbol.upper()
+    console.print(f"\n[bold cyan]Full Analysis: {symbol}[/bold cyan]\n")
+
+    # --- Fundamental ---
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol, force_refresh=refresh)
+    if not raw:
+        console.print(f"[red]Could not fetch fundamental data for {symbol}.[/red]")
+        raise typer.Exit(1)
+
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+
+    scorer = FundamentalScorer()
+    fs = scorer.score(profile)
+
+    # Check strategies
+    for name, screen_cls in SCREENS.items():
+        screen_obj = screen_cls()
+        result = screen_obj.screen(profile)
+        setattr(fs, f'matches_{name}', result.passes)
+
+    # --- Tailwind ---
+    # Determine sector from profile or stocks.json
+    sector = profile.sector
+    if not sector:
+        stocks = get_nifty500_stocks()
+        for s in stocks:
+            if s['symbol'] == symbol:
+                sector = s.get('sector', '')
+                break
+
+    tw_analyzer = TailwindAnalyzer()
+    tw_score = tw_analyzer.score_stock(symbol, sector) if sector else None
+
+    # --- Display fundamental ---
+    fund_output = FundamentalOutput()
+    fund_output.display_stock_analysis(profile, fs)
+
+    # --- Display composite ---
+    if tw_score:
+        composite_analyzer = CompositeAnalyzer()
+        composite = composite_analyzer.compute(fs, tw_score, profile)
+
+        console.print("\n" + "=" * 60)
+        tw_output = TailwindOutput()
+        tw_output.display_composite_analysis(
+            composite,
+            tw_score,
+            fundamental_green_flags=fs.green_flags,
+            fundamental_red_flags=fs.red_flags,
+        )
+    else:
+        console.print(f"\n[yellow]No sector mapping found for {symbol} - tailwind score unavailable.[/yellow]")
+
+
+@app.command()
+def full_scan(
+    top: int = typer.Option(20, "--top", "-n", help="Show top N stocks"),
+    sector: Optional[str] = typer.Option(
+        None, "--sector", "-s", help="Filter by sector"
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh all data"
+    ),
+):
+    """
+    Nifty 500 scan ranked by composite score (fundamental + tailwind).
+
+    Examples:
+        python main.py full-scan --top 10
+        python main.py full-scan --sector IT
+    """
+    from config import get_nifty500_stocks
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder, FundamentalScorer
+    from tailwinds.analyzer import TailwindAnalyzer, CompositeAnalyzer
+    from tailwinds.output import TailwindOutput
+
+    console.print("\n[bold cyan]Full Composite Scan - Nifty 500[/bold cyan]\n")
+
+    stocks = get_nifty500_stocks()
+    if not stocks:
+        console.print("[red]No Nifty 500 stocks found in stocks.json[/red]")
+        raise typer.Exit(1)
+
+    if sector:
+        stocks = [s for s in stocks if s.get('sector', '').lower() == sector.lower()]
+        console.print(f"Filtering by sector: {sector} ({len(stocks)} stocks)\n")
+
+    symbols = [s['symbol'] for s in stocks]
+    stock_sectors = {s['symbol']: s.get('sector', '') for s in stocks}
+
+    # Fetch fundamentals
+    fetcher = ScreenerFetcher()
+    raw_data = fetcher.fetch_batch(symbols, force_refresh=refresh)
+
+    # Score
+    builder = ProfileBuilder()
+    scorer = FundamentalScorer()
+    tw_analyzer = TailwindAnalyzer()
+    composite_analyzer = CompositeAnalyzer()
+
+    composites = []
+    for sym, raw in raw_data.items():
+        profile = builder.build(raw)
+        fs = scorer.score(profile)
+
+        sec = stock_sectors.get(sym, profile.sector or '')
+        tw = tw_analyzer.score_stock(sym, sec) if sec else None
+
+        if tw:
+            comp = composite_analyzer.compute(fs, tw, profile)
+            composites.append(comp)
+
+    composites.sort(key=lambda c: c.composite_score, reverse=True)
+
+    # Display
+    output = TailwindOutput()
+    output.display_composite_scan(composites, top_n=top)
+
+    console.print(f"\n[dim]Total: {len(composites)} stocks scored | Showing top {min(top, len(composites))}[/dim]")
+
+
 def main():
     """Main entry point."""
     console.print("\n[bold]Nifty Signals[/bold] - Indian Stock Trading Signals\n", style="cyan")

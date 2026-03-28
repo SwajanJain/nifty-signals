@@ -1,4 +1,12 @@
-"""Complete Exit Strategy Rules - When and how to exit trades."""
+"""
+Legendary Trader Exit Strategy Rules.
+
+Implements exit strategies inspired by:
+- Ed Seykota: "Cut losses short, let winners run" - wide trailing stops
+- Jesse Livermore: "Big money is made in the sitting" - no time limit on winners
+- Paul Tudor Jones: "Play great defense" - regime-aware exits
+- Mark Minervini: Technical invalidation triggers
+"""
 
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -17,6 +25,7 @@ class ExitReason(Enum):
     TARGET_3 = "TARGET_3"
     TRAILING_STOP = "TRAILING_STOP"
     TIME_STOP = "TIME_STOP"
+    OPPORTUNITY_COST = "OPPORTUNITY_COST"  # New: only for losers when better opportunity exists
     TECHNICAL_EXIT = "TECHNICAL_EXIT"
     REGIME_CHANGE = "REGIME_CHANGE"
     NEWS_EXIT = "NEWS_EXIT"
@@ -62,39 +71,44 @@ class TradePosition:
 
 class ExitStrategyManager:
     """
-    Manage exit strategies for open positions.
+    Legendary Trader Exit Strategy Manager.
 
     Implements:
-    - ATR-based trailing stops
-    - Chandelier exits
-    - Time-based exits
-    - Technical indicator exits
-    - Partial profit booking
-    - Emergency exits
+    - Seykota: Wide trailing stops (3x ATR), 25/25/50 partial exits
+    - Livermore: No time limit on winners, only exit losers
+    - PTJ: Regime-aware exits
+    - Minervini: Technical invalidation triggers
+
+    Key Philosophy:
+    "Let winners run, cut losers short"
     """
 
     def __init__(
         self,
-        max_holding_days: int = 20,
-        time_stop_days: int = 10,  # Exit if no progress after N days
-        trailing_start_r: float = 1.0,  # Start trailing after 1R profit
-        trailing_atr_multiple: float = 2.0,  # Trail by 2 ATR
-        partial_exit_1_pct: float = 40,  # Exit 40% at T1
-        partial_exit_2_pct: float = 40,  # Exit 40% at T2
-        # Remaining 20% rides to T3 or trailing stop
+        # Livermore: No max hold for winners - removed arbitrary 20-day limit
+        time_stop_days: int = 10,  # Only for LOSERS - if no progress
+        trailing_start_r: float = 1.5,  # Start trailing after 1.5R (Seykota)
+        trailing_atr_multiple: float = 3.0,  # Wide 3x ATR trail (Seykota)
+        partial_exit_1_pct: float = 25,  # Exit 25% at T1 (2R)
+        partial_exit_2_pct: float = 25,  # Exit 25% at T2 (4R)
+        # Remaining 50% rides with trailing stop to potential 10-20R
     ):
         """
-        Initialize exit manager.
+        Initialize exit manager - Legendary Trader Edition.
+
+        Key changes from standard:
+        - No max_holding_days - Livermore held winners for months
+        - Wide 3x ATR trailing stop - Seykota captures big trends
+        - 25/25/50 exits - lets 50% of position capture big moves
+        - Time stop only applies to LOSERS
 
         Args:
-            max_holding_days: Maximum days to hold any position
-            time_stop_days: Days without progress before exit
-            trailing_start_r: R multiple to start trailing
-            trailing_atr_multiple: ATR multiple for trailing stop
-            partial_exit_1_pct: Percentage to exit at T1
-            partial_exit_2_pct: Percentage to exit at T2
+            time_stop_days: Days without progress before exit (LOSERS ONLY)
+            trailing_start_r: R multiple to start trailing (default 1.5)
+            trailing_atr_multiple: ATR multiple for trailing (default 3.0 - wide)
+            partial_exit_1_pct: Percentage to exit at T1 (default 25%)
+            partial_exit_2_pct: Percentage to exit at T2 (default 25%)
         """
-        self.max_holding_days = max_holding_days
         self.time_stop_days = time_stop_days
         self.trailing_start_r = trailing_start_r
         self.trailing_atr_multiple = trailing_atr_multiple
@@ -229,41 +243,73 @@ class ExitStrategyManager:
 
         return position.stop_loss, False
 
-    def check_time_stop(self, position: TradePosition, df: pd.DataFrame) -> ExitSignal:
-        """Check time-based exit conditions."""
+    def check_time_stop(
+        self,
+        position: TradePosition,
+        df: pd.DataFrame,
+        better_opportunity_available: bool = False
+    ) -> ExitSignal:
+        """
+        Check time-based exit conditions - Livermore Edition.
+
+        KEY PHILOSOPHY: "Big money is made in the sitting"
+        - NO max holding period for winners
+        - Time stop ONLY applies to losing/flat positions
+        - Opportunity cost exit only when better signal exists
+
+        Args:
+            position: Current position
+            df: OHLCV DataFrame
+            better_opportunity_available: True if a better signal exists
+        """
         now = datetime.now()
         holding_days = (now - position.entry_date).days
 
-        # Max holding period exceeded
-        if holding_days >= self.max_holding_days:
+        # Calculate current profit in R
+        risk = abs(position.entry_price - position.stop_loss)
+        if risk == 0:
+            risk = position.entry_price * 0.02  # Fallback 2%
+
+        if position.direction == "LONG":
+            current_r = (position.current_price - position.entry_price) / risk
+        else:
+            current_r = (position.entry_price - position.current_price) / risk
+
+        # LIVERMORE RULE: Winners have NO time limit
+        if current_r >= 1.0:
             return ExitSignal(
-                should_exit=True,
+                should_exit=False,
                 exit_type=ExitReason.TIME_STOP,
-                urgency=ExitUrgency.END_OF_DAY,
-                exit_price=position.current_price,
-                exit_quantity_pct=100,
-                reason=f"Max holding period ({self.max_holding_days} days) exceeded"
+                urgency=ExitUrgency.MONITOR,
+                exit_price=None,
+                exit_quantity_pct=0,
+                reason=f"Winner at {current_r:.1f}R - no time limit (Livermore)"
             )
 
-        # No progress time stop
+        # For losers/flat positions: check time stop
         if holding_days >= self.time_stop_days:
-            # Check if price has made progress
-            risk = abs(position.entry_price - position.stop_loss)
-            if position.direction == "LONG":
-                progress = (position.current_price - position.entry_price) / risk
-            else:
-                progress = (position.entry_price - position.current_price) / risk
-
-            # If less than 0.5R after time_stop_days, consider exiting
-            if progress < 0.5:
-                return ExitSignal(
-                    should_exit=True,
-                    exit_type=ExitReason.TIME_STOP,
-                    urgency=ExitUrgency.NEXT_SESSION,
-                    exit_price=position.current_price,
-                    exit_quantity_pct=100,
-                    reason=f"No progress after {holding_days} days (only {progress:.1f}R)"
-                )
+            # If losing or barely profitable after time_stop_days
+            if current_r < 0.5:
+                # Opportunity cost exit: only if better opportunity exists
+                if better_opportunity_available:
+                    return ExitSignal(
+                        should_exit=True,
+                        exit_type=ExitReason.OPPORTUNITY_COST,
+                        urgency=ExitUrgency.NEXT_SESSION,
+                        exit_price=position.current_price,
+                        exit_quantity_pct=100,
+                        reason=f"Dead money ({current_r:.1f}R after {holding_days}d) - better opportunity exists"
+                    )
+                else:
+                    # No better opportunity - warn but don't force exit
+                    return ExitSignal(
+                        should_exit=False,
+                        exit_type=ExitReason.TIME_STOP,
+                        urgency=ExitUrgency.MONITOR,
+                        exit_price=None,
+                        exit_quantity_pct=0,
+                        reason=f"Flat at {current_r:.1f}R for {holding_days}d - watch for better setup"
+                    )
 
         return ExitSignal(
             should_exit=False,
@@ -271,7 +317,7 @@ class ExitStrategyManager:
             urgency=ExitUrgency.MONITOR,
             exit_price=None,
             exit_quantity_pct=0,
-            reason=f"Day {holding_days}/{self.max_holding_days}"
+            reason=f"Day {holding_days} | P&L: {current_r:.1f}R"
         )
 
     def check_technical_exit(self, position: TradePosition, df: pd.DataFrame) -> ExitSignal:
@@ -356,57 +402,64 @@ class ExitStrategyManager:
         self,
         position: TradePosition,
         df: pd.DataFrame,
-        market_regime: Optional[str] = None
+        market_regime: Optional[str] = None,
+        better_opportunity_available: bool = False
     ) -> List[ExitSignal]:
         """
-        Evaluate all exit conditions for a position.
+        Evaluate all exit conditions for a position - Legendary Trader Edition.
+
+        Key Philosophy:
+        - Stop loss is ALWAYS respected (defense first - PTJ)
+        - Winners trail with wide stops (Seykota)
+        - No arbitrary time limit on winners (Livermore)
+        - Regime change overrides all (PTJ)
 
         Args:
             position: Current position
             df: OHLCV DataFrame
             market_regime: Current market regime (if known)
+            better_opportunity_available: True if scanner found better signal
 
         Returns:
             List of ExitSignals sorted by urgency
         """
         signals = []
 
-        # Check stop loss first (highest priority)
+        # Check stop loss first (highest priority) - PTJ: "Defense first"
         sl_signal = self.check_stop_loss(position)
         if sl_signal.should_exit:
             signals.append(sl_signal)
             return signals  # Stop loss is immediate, don't check others
 
-        # Check targets
+        # Check targets (25/25/50 exit plan)
         target_signal = self.check_targets(position, df)
         if target_signal.should_exit:
             signals.append(target_signal)
 
-        # Calculate and check trailing stop
+        # Calculate and check trailing stop (3x ATR - Seykota style)
         new_stop, should_update = self.calculate_trailing_stop(position, df)
         if should_update:
-            # Update position's stop loss (would be done by caller)
             signals.append(ExitSignal(
                 should_exit=False,
                 exit_type=ExitReason.TRAILING_STOP,
                 urgency=ExitUrgency.MONITOR,
                 exit_price=None,
                 exit_quantity_pct=0,
-                reason=f"Update trailing stop to {new_stop}",
+                reason=f"Trail stop → Rs {new_stop} (3x ATR Chandelier)",
                 new_stop_loss=new_stop
             ))
 
-        # Check time stop
-        time_signal = self.check_time_stop(position, df)
+        # Check time/opportunity cost (Livermore: only exit losers)
+        time_signal = self.check_time_stop(position, df, better_opportunity_available)
         if time_signal.should_exit:
             signals.append(time_signal)
 
-        # Check technical exits
+        # Check technical exits (Minervini: invalidation triggers)
         tech_signal = self.check_technical_exit(position, df)
         if tech_signal.should_exit:
             signals.append(tech_signal)
 
-        # Check regime change
+        # Check regime change - PTJ: "Know when to be defensive"
         if market_regime in ["CRASH", "STRONG_BEAR"]:
             signals.append(ExitSignal(
                 should_exit=True,
@@ -414,7 +467,7 @@ class ExitStrategyManager:
                 urgency=ExitUrgency.END_OF_DAY,
                 exit_price=position.current_price,
                 exit_quantity_pct=100,
-                reason=f"Market regime changed to {market_regime}"
+                reason=f"Regime → {market_regime} - exit all longs (PTJ defense)"
             ))
 
         # Sort by urgency

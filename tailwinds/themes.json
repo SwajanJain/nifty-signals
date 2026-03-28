@@ -1,0 +1,353 @@
+{
+  "themes": [
+    {
+      "id": "pli_electronics",
+      "name": "PLI - Electronics Manufacturing",
+      "category": "GOVERNMENT_POLICY",
+      "description": "Production Linked Incentive scheme for electronics and semiconductor manufacturing, driving domestic production and import substitution.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"IT": 0.5, "Capital Goods": 0.7, "Consumer": 0.4},
+      "affected_stocks": ["DIXON", "AMBER", "KAYNES"],
+      "evidence": [
+        "PLI scheme approved for Rs 76,000 Cr across electronics",
+        "India Semiconductor Mission with Rs 76,000 Cr outlay",
+        "Apple, Samsung expanding manufacturing in India"
+      ],
+      "started": "2021-Q1",
+      "expected_duration": "5-7 years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "pli_auto",
+      "name": "PLI - Auto Components & EV",
+      "category": "GOVERNMENT_POLICY",
+      "description": "PLI scheme for automotive industry and advanced chemistry cell batteries, boosting EV ecosystem and component localization.",
+      "direction": "TAILWIND",
+      "strength": 3,
+      "affected_sectors": {"Auto": 0.8, "Capital Goods": 0.4},
+      "affected_stocks": ["MOTHERSON", "BHARATFORG", "EXIDEIND"],
+      "evidence": [
+        "PLI for auto sector: Rs 25,938 Cr approved",
+        "ACC PLI for battery manufacturing: Rs 18,100 Cr",
+        "FAME II subsidy driving EV adoption"
+      ],
+      "started": "2021-Q3",
+      "expected_duration": "5 years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "china_plus_one",
+      "name": "China+1 Supply Chain Shift",
+      "category": "DEMAND_SHIFT",
+      "description": "Global companies diversifying supply chains away from China post-COVID, creating massive demand for Indian chemical, pharma, and textile manufacturers.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"Chemicals": 0.8, "Pharma": 0.7, "Textiles": 0.6, "Capital Goods": 0.4},
+      "affected_stocks": ["PIIND", "ATUL", "SRF", "DEEPAKNTR"],
+      "evidence": [
+        "Global MNCs actively onboarding Indian chemical suppliers",
+        "India's chemical exports growing 15%+ CAGR",
+        "Textile PLI driving capacity addition"
+      ],
+      "started": "2020-Q2",
+      "expected_duration": "ongoing (structural shift)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "ev_transition_tailwind",
+      "name": "EV Transition in India",
+      "category": "TECHNOLOGY",
+      "description": "Electric vehicle adoption accelerating in India across 2W, 3W, and 4W segments. Benefits EV-ready OEMs, battery makers, and charging infra.",
+      "direction": "TAILWIND",
+      "strength": 3,
+      "affected_sectors": {"Auto": 0.6, "Capital Goods": 0.4, "Power": 0.3},
+      "affected_stocks": ["TATAMOTORS", "M&M", "TVSMOTOR"],
+      "evidence": [
+        "EV penetration in 2W crossing 5%, 4W at 2%",
+        "Major OEMs launching EV-only platforms",
+        "Battery costs declining 15% YoY"
+      ],
+      "started": "2022-Q1",
+      "expected_duration": "10+ years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "ev_ice_headwind",
+      "name": "EV Transition - ICE Disruption",
+      "category": "TECHNOLOGY",
+      "description": "Long-term headwind for pure ICE (internal combustion engine) dependent companies and fossil fuel demand as EV adoption grows.",
+      "direction": "HEADWIND",
+      "strength": 2,
+      "affected_sectors": {"Oil & Gas": 0.3},
+      "affected_stocks": [],
+      "evidence": [
+        "Peak oil demand projections being revised down",
+        "ICE ban discussions in EU affecting global OEM strategy"
+      ],
+      "started": "2023-Q1",
+      "expected_duration": "long-term structural",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "infra_capex_cycle",
+      "name": "Infrastructure Capex Cycle (NIP)",
+      "category": "GOVERNMENT_POLICY",
+      "description": "National Infrastructure Pipeline with Rs 111 lakh Cr investment target. Massive government capex on roads, railways, ports, airports, and urban infra.",
+      "direction": "TAILWIND",
+      "strength": 5,
+      "affected_sectors": {"Infra": 0.9, "Cement": 0.8, "Capital Goods": 0.7, "Metals": 0.5, "Power": 0.4},
+      "affected_stocks": ["LT", "ADANIPORTS", "ULTRACEMCO", "JSWSTEEL", "SIEMENS"],
+      "evidence": [
+        "Government capex allocation consistently rising 20%+ YoY",
+        "NHAI highway construction at record pace",
+        "Vande Bharat, bullet train, metro expansion",
+        "PM Gati Shakti masterplan for multimodal connectivity"
+      ],
+      "started": "2020-Q1",
+      "expected_duration": "2020-2030 (full decade)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "digital_india_upi",
+      "name": "Digital India / UPI Growth",
+      "category": "TECHNOLOGY",
+      "description": "Digital payments via UPI growing exponentially. Fintech and digital banking disrupting traditional financial services. Data consumption rising.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"IT": 0.6, "Banking": 0.5, "Financial Services": 0.5, "Insurance": 0.3},
+      "affected_stocks": ["INFY", "TCS", "JIOFIN", "PAYTM"],
+      "evidence": [
+        "UPI transactions crossing 15 billion per month",
+        "Digital lending growing 30%+ CAGR",
+        "Jan Dhan + Aadhaar + Mobile (JAM trinity) enabling financial inclusion"
+      ],
+      "started": "2020-Q1",
+      "expected_duration": "ongoing (structural)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "defense_indigenization",
+      "name": "Defense Indigenization (Atmanirbhar)",
+      "category": "GOVERNMENT_POLICY",
+      "description": "Government pushing for self-reliance in defense manufacturing. Import embargo on 400+ items. Defense budget allocation rising consistently.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"Capital Goods": 0.8, "Metals": 0.4},
+      "affected_stocks": ["BEL", "HAL", "BHEL", "SOLARINDS", "COCHINSHIP"],
+      "evidence": [
+        "Defense budget crossed Rs 6 lakh Cr",
+        "Positive indigenization list: 400+ items under import embargo",
+        "Defense exports growing 10x in 5 years",
+        "Major orders: Tejas, Brahmos, naval vessels to domestic players"
+      ],
+      "started": "2020-Q3",
+      "expected_duration": "10+ years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "green_energy_transition",
+      "name": "Green Energy Transition",
+      "category": "GLOBAL_MACRO",
+      "description": "India targeting 500 GW renewable energy by 2030. Solar, wind, green hydrogen getting massive policy support and global investment.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"Power": 0.8, "Capital Goods": 0.5},
+      "affected_stocks": ["ADANIGREEN", "NTPC", "TATAPOWER", "JSWENERGY"],
+      "evidence": [
+        "India's 500 GW renewable target by 2030",
+        "National Green Hydrogen Mission: Rs 19,744 Cr",
+        "Solar tariffs at all-time lows making renewables cheaper than coal",
+        "Global ESG flows directing capital to green energy"
+      ],
+      "started": "2021-Q1",
+      "expected_duration": "2021-2035",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "crude_oil_headwind",
+      "name": "Rising Crude Oil Prices",
+      "category": "COMMODITY_CYCLE",
+      "description": "Elevated crude oil prices act as a headwind for oil-importing sectors through higher input costs, logistics costs, and margin pressure.",
+      "direction": "HEADWIND",
+      "strength": 3,
+      "affected_sectors": {"Auto": 0.4, "FMCG": 0.3, "Chemicals": 0.3},
+      "affected_stocks": [],
+      "evidence": [
+        "India imports 85% of crude oil requirements",
+        "Every $10/bbl rise impacts GDP by 0.3%",
+        "Paint, chemical, and FMCG companies face raw material inflation"
+      ],
+      "started": "2024-Q3",
+      "expected_duration": "cyclical (12-18 months)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "rera_real_estate",
+      "name": "RERA + Real Estate Formalization",
+      "category": "REGULATORY",
+      "description": "RERA regulation has cleaned up real estate, favoring organized listed players. Affordable housing push and low unsold inventory driving new cycle.",
+      "direction": "TAILWIND",
+      "strength": 3,
+      "affected_sectors": {"Real Estate": 0.7, "Cement": 0.3, "Banking": 0.2},
+      "affected_stocks": ["DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE"],
+      "evidence": [
+        "RERA eliminated fly-by-night developers",
+        "Listed developers gaining market share from unorganized sector",
+        "Housing sales at decade highs across top cities",
+        "Unsold inventory at multi-year lows"
+      ],
+      "started": "2020-Q1",
+      "expected_duration": "ongoing (structural shift)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "insurance_penetration",
+      "name": "Insurance Penetration Growth",
+      "category": "DEMOGRAPHIC",
+      "description": "India's insurance penetration is among the lowest globally. Rising awareness post-COVID, regulatory push, and digital distribution driving rapid growth.",
+      "direction": "TAILWIND",
+      "strength": 3,
+      "affected_sectors": {"Insurance": 0.9, "Financial Services": 0.4},
+      "affected_stocks": ["SBILIFE", "HDFCLIFE", "ICICIGI", "STARHEALTH"],
+      "evidence": [
+        "Insurance penetration at ~4% vs global 7%+",
+        "COVID drove awareness of health and life insurance",
+        "IRDAI simplifying regulations to boost adoption"
+      ],
+      "started": "2020-Q1",
+      "expected_duration": "10+ years (structural)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "premiumization",
+      "name": "Premiumization Trend",
+      "category": "DEMOGRAPHIC",
+      "description": "Rising incomes and aspirational middle class driving premiumization across consumption categories - from SUVs to premium FMCG to branded lifestyle.",
+      "direction": "TAILWIND",
+      "strength": 3,
+      "affected_sectors": {"Consumer": 0.7, "FMCG": 0.6, "Auto": 0.5},
+      "affected_stocks": ["TITAN", "TRENT", "DMART", "MARUTI", "ASIANPAINT"],
+      "evidence": [
+        "SUV share in car sales crossed 55%",
+        "Premium FMCG growing 2x vs mass market",
+        "Branded apparel and lifestyle retail expanding rapidly"
+      ],
+      "started": "2022-Q1",
+      "expected_duration": "ongoing (structural)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "credit_growth_cycle",
+      "name": "Credit Growth Cycle",
+      "category": "DEMAND_SHIFT",
+      "description": "Indian banking system cleaned up post-IBC. Credit growth reviving to 15%+ driven by retail, MSME, and corporate capex lending.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"Banking": 0.8, "Financial Services": 0.7, "Insurance": 0.3},
+      "affected_stocks": ["HDFCBANK", "ICICIBANK", "SBIN", "BAJFINANCE", "CHOLAFIN"],
+      "evidence": [
+        "Bank credit growth at 15%+ sustained",
+        "GNPA ratios at decade lows across banking system",
+        "Corporate capex cycle reviving after decade-long lull",
+        "Retail credit penetration still low vs developed markets"
+      ],
+      "started": "2022-Q3",
+      "expected_duration": "3-5 years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "pharma_api_shift",
+      "name": "Pharma API Shift to India",
+      "category": "DEMAND_SHIFT",
+      "description": "India becoming the global pharmacy. API (Active Pharmaceutical Ingredient) manufacturing shifting from China to India with government support.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"Pharma": 0.8, "Chemicals": 0.6, "Healthcare": 0.3},
+      "affected_stocks": ["SUNPHARMA", "DRREDDY", "DIVISLAB", "LALPATHLAB"],
+      "evidence": [
+        "PLI for pharma: Rs 15,000 Cr for API and bulk drugs",
+        "India supplies 20% of global generic medicines",
+        "Biosimilar opportunity: $100B market opening up",
+        "US FDA approvals for Indian manufacturers increasing"
+      ],
+      "started": "2020-Q3",
+      "expected_duration": "10+ years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "ai_cloud_boom",
+      "name": "AI / Cloud Computing Boom",
+      "category": "TECHNOLOGY",
+      "description": "Global AI and cloud computing spending surge creating demand for Indian IT services companies. Also driving data center investments in India.",
+      "direction": "TAILWIND",
+      "strength": 4,
+      "affected_sectors": {"IT": 0.7, "Power": 0.3},
+      "affected_stocks": ["TCS", "INFY", "HCLTECH", "LTIM", "COFORGE"],
+      "evidence": [
+        "Global AI spending expected to cross $500B by 2027",
+        "Indian IT companies winning GenAI transformation deals",
+        "Cloud migration deals driving multi-year revenue visibility",
+        "Data center capacity in India expanding 3x"
+      ],
+      "started": "2023-Q1",
+      "expected_duration": "5-10 years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "rising_interest_rates",
+      "name": "Tight Liquidity / High Interest Rates",
+      "category": "COMMODITY_CYCLE",
+      "description": "Elevated interest rates increase borrowing costs, hurt real estate demand, and compress valuations for rate-sensitive sectors.",
+      "direction": "HEADWIND",
+      "strength": 3,
+      "affected_sectors": {"Real Estate": 0.6, "Financial Services": 0.4, "Capital Goods": 0.2},
+      "affected_stocks": [],
+      "evidence": [
+        "RBI repo rate at elevated levels",
+        "EMIs at multi-year highs impacting housing demand",
+        "NBFC borrowing costs squeezing margins"
+      ],
+      "started": "2023-Q1",
+      "expected_duration": "cyclical (until rate cut cycle begins)",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    },
+    {
+      "id": "data_center_boom",
+      "name": "Data Center Boom in India",
+      "category": "TECHNOLOGY",
+      "description": "India emerging as a major data center hub. Data localization norms, growing internet users, and cloud adoption driving hyperscale DC investments.",
+      "direction": "TAILWIND",
+      "strength": 3,
+      "affected_sectors": {"IT": 0.5, "Power": 0.4, "Capital Goods": 0.3, "Real Estate": 0.2},
+      "affected_stocks": ["ADANIGREEN", "NTPC", "POWERGRID"],
+      "evidence": [
+        "India's DC capacity expected to triple by 2028",
+        "Major investments by AWS, Google, Microsoft, Reliance",
+        "Data localization driving captive DC demand",
+        "Each 100 MW DC drives Rs 5,000 Cr investment"
+      ],
+      "started": "2022-Q1",
+      "expected_duration": "5-10 years",
+      "last_reviewed": "2026-03-01",
+      "active": true
+    }
+  ]
+}

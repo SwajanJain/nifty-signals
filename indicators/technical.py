@@ -1,7 +1,16 @@
 """Technical indicators calculation."""
 
 from typing import Dict, Tuple
+import os
 import pandas as pd
+
+from config import CACHE_DIR
+
+# pandas_ta uses numba with on-disk caching; ensure it has a writable cache dir.
+_NUMBA_CACHE_DIR = CACHE_DIR / "numba"
+_NUMBA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("NUMBA_CACHE_DIR", str(_NUMBA_CACHE_DIR))
+
 import pandas_ta as ta
 
 from config import (
