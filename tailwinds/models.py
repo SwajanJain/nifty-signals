@@ -112,5 +112,10 @@ class CompositeScore:
     tailwind_score: int = 50  # 0-100
     tailwind_grade: str = ""
 
+    # Valuation model signals (populated when valuation models are run)
+    valuation_signal: str = ""  # UNDERVALUED, FAIR, OVERVALUED
+    valuation_fair_value: float = 0.0
+    valuation_margin_of_safety: float = 0.0  # %
+
     composite_score: int = 0  # Weighted blend
     composite_grade: str = ""

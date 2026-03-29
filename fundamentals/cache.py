@@ -10,7 +10,10 @@ from config import CACHE_DIR
 
 
 FUNDAMENTAL_CACHE_DB = CACHE_DIR / "fundamental_cache.db"
-CACHE_EXPIRY_HOURS = 168  # 7 days
+CACHE_EXPIRY_HOURS = 168  # 7 days — quarterly financials change infrequently
+# Price data within the cache goes stale faster than financials.
+# Consumers should check 'price_data_stale' flag in returned data.
+PRICE_STALENESS_HOURS = 24
 
 
 class FundamentalCache:
@@ -44,7 +47,12 @@ class FundamentalCache:
     # --- Raw data ---
 
     def get_raw(self, symbol: str) -> Optional[Dict]:
-        """Get cached raw data dict if not expired."""
+        """Get cached raw data dict if not expired.
+
+        Adds 'price_data_stale' flag if cache is older than PRICE_STALENESS_HOURS.
+        Financials (quarterly/annual) are valid for the full CACHE_EXPIRY_HOURS,
+        but price fields (current_price, market_cap) go stale faster.
+        """
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 "SELECT data_json, updated_at FROM raw_data WHERE symbol = ?",
@@ -55,7 +63,13 @@ class FundamentalCache:
             return None
         if self._is_expired(row[1]):
             return None
-        return json.loads(row[0])
+
+        data = json.loads(row[0])
+        updated_at = datetime.fromisoformat(row[1])
+        age_hours = (datetime.now() - updated_at).total_seconds() / 3600
+        data['price_data_stale'] = age_hours > PRICE_STALENESS_HOURS
+        data['cache_age_hours'] = round(age_hours, 1)
+        return data
 
     def set_raw(self, symbol: str, data: Dict):
         """Cache raw scraped data as dict."""

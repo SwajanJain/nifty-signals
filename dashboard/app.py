@@ -203,14 +203,14 @@ with tab_fundamentals:
 
                     col1, col2, col3, col4 = st.columns(4)
                     col1.metric("Score", f"{fs.total_score}/100")
-                    col2.metric("PE", f"{profile.pe_ratio:.1f}")
-                    col3.metric("ROE", f"{profile.roe:.1f}%")
+                    col2.metric("PE", f"{profile.pe_ratio or 0:.1f}")
+                    col3.metric("ROE", f"{profile.roe or 0:.1f}%")
                     col4.metric("D/E", f"{profile.debt_to_equity:.2f}")
 
                     col5, col6, col7, col8 = st.columns(4)
                     col5.metric("Revenue Growth 3Y", f"{profile.revenue_growth_3y:.1f}%")
                     col6.metric("Profit Growth 3Y", f"{profile.profit_growth_3y:.1f}%")
-                    col7.metric("ROCE", f"{profile.roce:.1f}%")
+                    col7.metric("ROCE", f"{profile.roce or 0:.1f}%")
                     col8.metric("Market Cap", f"₹{profile.market_cap_cr:,.0f} Cr")
 
                     if fs.green_flags:

@@ -69,22 +69,22 @@ class FundamentalProfile:
     industry: str
 
     # --- Valuation ---
-    market_cap: float = 0.0  # Cr
-    current_price: float = 0.0
-    pe_ratio: float = 0.0
-    pb_ratio: float = 0.0
-    ev_ebitda: float = 0.0
-    peg_ratio: float = 0.0
+    market_cap: float = 0.0  # Cr (always present)
+    current_price: float = 0.0  # (always present)
+    pe_ratio: Optional[float] = None
+    pb_ratio: Optional[float] = None
+    ev_ebitda: Optional[float] = None
+    peg_ratio: Optional[float] = None
     dividend_yield: float = 0.0  # %
-    fcf_yield: float = 0.0  # %
-    earnings_yield: float = 0.0  # %
-    price_to_sales: float = 0.0
+    fcf_yield: Optional[float] = None  # %
+    earnings_yield: Optional[float] = None  # %
+    price_to_sales: Optional[float] = None
 
     # --- Profitability ---
-    roe: float = 0.0  # %
-    roce: float = 0.0  # %
-    npm: float = 0.0  # Net profit margin % (TTM)
-    opm: float = 0.0  # Operating profit margin % (TTM)
+    roe: Optional[float] = None  # %
+    roce: Optional[float] = None  # %
+    npm: Optional[float] = None  # Net profit margin % (TTM)
+    opm: Optional[float] = None  # Operating profit margin % (TTM)
 
     # --- DuPont Decomposition ---
     dupont_npm: float = 0.0
@@ -140,7 +140,7 @@ class FundamentalProfile:
     dividend_growing: bool = False
 
     # --- Derived ---
-    eps_ttm: float = 0.0
+    eps_ttm: Optional[float] = None
     book_value_per_share: float = 0.0
     dividend_payout_ratio: float = 0.0  # %
 
@@ -177,6 +177,14 @@ class FundamentalScore:
     matches_quality: bool = False
     matches_garp: bool = False
     matches_dividend: bool = False
+
+    # Scoring model results (populated by scores/ package)
+    piotroski_score: Optional[int] = None  # 0-9 F-Score
+    piotroski_zone: str = ""  # STRONG, MODERATE, WEAK
+    altman_z_score: Optional[float] = None
+    altman_zone: str = ""  # SAFE, GREY, DISTRESS
+    beneish_m_score: Optional[float] = None
+    beneish_flag: bool = False  # True = likely manipulator
 
 
 @dataclass

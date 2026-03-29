@@ -27,19 +27,22 @@ class GARPScreen(BaseScreen):
         met = []
         failed = []
         score = 0
+        peg = p.peg_ratio or 0
+        roe = p.roe or 0
+        pe = p.pe_ratio or 0
 
         # 1. PEG ratio < 1.5
-        if 0 < p.peg_ratio <= 0.5:
-            met.append(f"PEG {p.peg_ratio:.1f} (exceptional)")
+        if 0 < peg <= 0.5:
+            met.append(f"PEG {peg:.1f} (exceptional)")
             score += 30
-        elif 0 < p.peg_ratio <= 1.0:
-            met.append(f"PEG {p.peg_ratio:.1f} (attractive)")
+        elif 0 < peg <= 1.0:
+            met.append(f"PEG {peg:.1f} (attractive)")
             score += 25
-        elif 0 < p.peg_ratio <= 1.5:
-            met.append(f"PEG {p.peg_ratio:.1f} (reasonable)")
+        elif 0 < peg <= 1.5:
+            met.append(f"PEG {peg:.1f} (reasonable)")
             score += 15
         else:
-            failed.append(f"PEG {p.peg_ratio:.1f} > 1.5")
+            failed.append(f"PEG {peg:.1f} > 1.5")
 
         # 2. Earnings growth > 15% (3Y CAGR)
         if p.profit_growth_3y >= 25:
@@ -55,40 +58,40 @@ class GARPScreen(BaseScreen):
             failed.append(f"Profit growth {p.profit_growth_3y:.0f}% < 15%")
 
         # 3. ROE > 15%
-        if p.roe >= 25:
-            met.append(f"ROE {p.roe:.1f}% (excellent)")
+        if roe >= 25:
+            met.append(f"ROE {roe:.1f}% (excellent)")
             score += 20
-        elif p.roe >= 20:
-            met.append(f"ROE {p.roe:.1f}% (strong)")
+        elif roe >= 20:
+            met.append(f"ROE {roe:.1f}% (strong)")
             score += 15
-        elif p.roe >= 15:
-            met.append(f"ROE {p.roe:.1f}%")
+        elif roe >= 15:
+            met.append(f"ROE {roe:.1f}%")
             score += 10
         else:
-            failed.append(f"ROE {p.roe:.1f}% < 15%")
+            failed.append(f"ROE {roe:.1f}% < 15%")
 
         # 4. P/E < 30 (reasonable valuation)
-        if 0 < p.pe_ratio <= 15:
-            met.append(f"PE {p.pe_ratio:.1f} (cheap)")
+        if 0 < pe <= 15:
+            met.append(f"PE {pe:.1f} (cheap)")
             score += 25
-        elif p.pe_ratio <= 20:
-            met.append(f"PE {p.pe_ratio:.1f} (reasonable)")
+        elif pe <= 20:
+            met.append(f"PE {pe:.1f} (reasonable)")
             score += 20
-        elif p.pe_ratio <= 25:
-            met.append(f"PE {p.pe_ratio:.1f} (fair)")
+        elif pe <= 25:
+            met.append(f"PE {pe:.1f} (fair)")
             score += 15
-        elif p.pe_ratio <= 30:
-            met.append(f"PE {p.pe_ratio:.1f} (slightly rich)")
+        elif pe <= 30:
+            met.append(f"PE {pe:.1f} (slightly rich)")
             score += 10
         else:
-            failed.append(f"PE {p.pe_ratio:.1f} > 30")
+            failed.append(f"PE {pe:.1f} > 30")
 
         # Hard pass criteria
         passes = (
-            0 < p.peg_ratio <= 1.5
+            0 < peg <= 1.5
             and p.profit_growth_3y >= 15
-            and p.roe >= 15
-            and 0 < p.pe_ratio <= 30
+            and roe >= 15
+            and 0 < pe <= 30
         )
 
         return ScreenResult(
@@ -101,9 +104,9 @@ class GARPScreen(BaseScreen):
             criteria_met=met,
             criteria_failed=failed,
             key_metrics={
-                'PEG': p.peg_ratio,
-                'PE': p.pe_ratio,
-                'ROE': f"{p.roe:.1f}%",
+                'PEG': peg,
+                'PE': pe,
+                'ROE': f"{roe:.1f}%",
                 'Profit Growth': f"{p.profit_growth_3y:.0f}%",
             },
         )

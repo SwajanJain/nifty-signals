@@ -11,7 +11,12 @@ class ProfileBuilder:
 
     def build(self, raw: ScreenerRawData) -> FundamentalProfile:
         """Build complete fundamental profile from raw screener data."""
+        # Detect banking/finance: check sector, industry, and symbol/name as fallback
         is_banking = raw.sector in BANKING_SECTORS or raw.industry in BANKING_SECTORS
+        if not is_banking:
+            name_lower = (raw.company_name + ' ' + raw.symbol).lower()
+            banking_keywords = ['bank', 'financ', 'insurance', 'nbfc', 'housing finance']
+            is_banking = any(kw in name_lower for kw in banking_keywords)
 
         p = FundamentalProfile(
             symbol=raw.symbol,
@@ -26,16 +31,16 @@ class ProfileBuilder:
         # --- Direct values ---
         p.market_cap = raw.market_cap
         p.current_price = raw.current_price
-        p.pe_ratio = raw.pe_ratio
+        p.pe_ratio = raw.pe_ratio if raw.pe_ratio != 0 else None
         p.dividend_yield = raw.dividend_yield
-        p.roe = raw.roe
-        p.roce = raw.roce
+        p.roe = raw.roe if raw.roe != 0 else None
+        p.roce = raw.roce if raw.roce != 0 else None
         p.book_value_per_share = raw.book_value
 
         # --- Computed valuation ---
         p.pb_ratio = self._compute_pb(raw)
         p.ev_ebitda = self._compute_ev_ebitda(raw)
-        p.earnings_yield = (100.0 / raw.pe_ratio) if raw.pe_ratio > 0 else 0
+        p.earnings_yield = (100.0 / raw.pe_ratio) if raw.pe_ratio and raw.pe_ratio > 0 else None
         p.price_to_sales = self._compute_price_to_sales(raw)
         p.eps_ttm = self._compute_eps_ttm(raw)
 
@@ -134,24 +139,24 @@ class ProfileBuilder:
 
     # --- Computation helpers ---
 
-    def _compute_pb(self, raw: ScreenerRawData) -> float:
+    def _compute_pb(self, raw: ScreenerRawData) -> Optional[float]:
         if raw.book_value and raw.book_value > 0 and raw.current_price > 0:
             return round(raw.current_price / raw.book_value, 2)
-        return 0
+        return None
 
-    def _compute_peg(self, pe: float, growth: float) -> float:
-        if pe > 0 and growth > 1:
+    def _compute_peg(self, pe: Optional[float], growth: float) -> Optional[float]:
+        if pe and pe > 0 and growth > 1:
             return round(pe / growth, 2)
-        return 0
+        return None
 
-    def _compute_price_to_sales(self, raw: ScreenerRawData) -> float:
+    def _compute_price_to_sales(self, raw: ScreenerRawData) -> Optional[float]:
         """Market cap / TTM sales."""
         ttm_sales = self._get_latest_annual_value(raw, 'Sales')
         if ttm_sales and ttm_sales > 0 and raw.market_cap > 0:
             return round(raw.market_cap / ttm_sales, 2)
-        return 0
+        return None
 
-    def _compute_eps_ttm(self, raw: ScreenerRawData) -> float:
+    def _compute_eps_ttm(self, raw: ScreenerRawData) -> Optional[float]:
         """Get TTM EPS from annual P&L (tries multiple label variants)."""
         for label in ('EPS in Rs', 'Basic EPS', 'EPS'):
             val = self._get_latest_annual_value(raw, label)
@@ -165,9 +170,9 @@ class ProfileBuilder:
             if shares_cr > 0:
                 return round(net_profit / shares_cr, 2)
 
-        return 0
+        return None
 
-    def _compute_ev_ebitda(self, raw: ScreenerRawData) -> float:
+    def _compute_ev_ebitda(self, raw: ScreenerRawData) -> Optional[float]:
         """EV/EBITDA = (Market Cap + Debt - Cash) / EBITDA."""
         debt = self._get_latest_bs_value(raw, 'Borrowings') or 0
         cash = self._get_latest_bs_value(raw, 'Cash Equivalents') or 0
@@ -182,11 +187,11 @@ class ProfileBuilder:
             ev = raw.market_cap + debt - cash
             if ebitda > 0:
                 return round(ev / ebitda, 2)
-        return 0
+        return None
 
-    def _compute_margins(self, raw: ScreenerRawData) -> Dict[str, float]:
+    def _compute_margins(self, raw: ScreenerRawData) -> Dict[str, Optional[float]]:
         """NPM and OPM from latest annual P&L."""
-        result = {'npm': 0, 'opm': 0}
+        result = {'npm': None, 'opm': None}
 
         sales = self._get_latest_annual_value(raw, 'Sales')
         if not sales or sales <= 0:
@@ -549,8 +554,12 @@ class ProfileBuilder:
 class FundamentalScorer:
     """Compute composite fundamental score (0-100)."""
 
-    def score(self, profile: FundamentalProfile) -> FundamentalScore:
-        """Compute complete fundamental score."""
+    def score(self, profile: FundamentalProfile, raw: 'ScreenerRawData' = None) -> FundamentalScore:
+        """Compute complete fundamental score.
+
+        If raw data is provided, also runs Piotroski/Altman/Beneish scoring
+        models and integrates their results into flags.
+        """
         fs = FundamentalScore(
             symbol=profile.symbol,
             company_name=profile.company_name,
@@ -575,58 +584,103 @@ class FundamentalScorer:
         fs.grade = self._assign_grade(fs.total_score)
         fs.green_flags, fs.red_flags = self._identify_flags(profile)
 
+        # Enrich with scoring models if raw data available
+        if raw is not None:
+            self._enrich_with_scoring_models(fs, profile, raw)
+
         return fs
+
+    def _enrich_with_scoring_models(self, fs: FundamentalScore, profile: FundamentalProfile, raw: 'ScreenerRawData'):
+        """Run Piotroski, Altman Z, and Beneish M scoring models and attach results."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            from .scores.piotroski import PiotroskiFScore
+            result = PiotroskiFScore().score(profile, raw)
+            fs.piotroski_score = result.f_score
+            fs.piotroski_zone = result.zone
+            if result.f_score >= 7:
+                fs.green_flags.append(f"Piotroski F-Score: {result.f_score}/9 (STRONG)")
+            elif result.f_score <= 3:
+                fs.red_flags.append(f"Piotroski F-Score: {result.f_score}/9 (WEAK)")
+        except Exception as e:
+            logger.debug(f"Piotroski scoring failed for {profile.symbol}: {e}")
+
+        try:
+            from .scores.altman import AltmanZScore
+            result = AltmanZScore().score(profile, raw)
+            if result.is_applicable:
+                fs.altman_z_score = result.z_score
+                fs.altman_zone = result.zone
+                if result.zone == 'SAFE':
+                    fs.green_flags.append(f"Altman Z: {result.z_score:.1f} (SAFE)")
+                elif result.zone == 'DISTRESS':
+                    fs.red_flags.append(f"Altman Z: {result.z_score:.1f} (DISTRESS)")
+        except Exception as e:
+            logger.debug(f"Altman Z scoring failed for {profile.symbol}: {e}")
+
+        try:
+            from .scores.beneish import BeneishMScore
+            result = BeneishMScore().score(profile, raw)
+            fs.beneish_m_score = result.m_score
+            fs.beneish_flag = result.is_manipulator
+            if result.is_manipulator and result.confidence in ('HIGH', 'MEDIUM'):
+                fs.red_flags.append(f"Beneish M-Score: {result.m_score:.1f} (manipulation risk)")
+        except Exception as e:
+            logger.debug(f"Beneish M scoring failed for {profile.symbol}: {e}")
 
     def _score_valuation(self, p: FundamentalProfile) -> int:
         """Score 0-20: PE(0-6), PB(0-4), PEG(0-5), EV/EBITDA(0-3), FCF yield(0-2)."""
         score = 0
 
-        # PE ratio (lower is better for value)
+        # PE ratio (lower is better for value) — None means not available
         pe = p.pe_ratio
-        if 0 < pe <= 10:
+        if pe is not None and 0 < pe <= 10:
             score += 6
-        elif pe <= 15:
+        elif pe is not None and pe <= 15:
             score += 5
-        elif pe <= 20:
+        elif pe is not None and pe <= 20:
             score += 3
-        elif pe <= 30:
+        elif pe is not None and pe <= 30:
             score += 1
 
         # PB ratio
         pb = p.pb_ratio
-        if 0 < pb <= 1.0:
+        if pb is not None and 0 < pb <= 1.0:
             score += 4
-        elif pb <= 2.0:
+        elif pb is not None and pb <= 2.0:
             score += 3
-        elif pb <= 3.0:
+        elif pb is not None and pb <= 3.0:
             score += 2
-        elif pb <= 5.0:
+        elif pb is not None and pb <= 5.0:
             score += 1
 
         # PEG ratio
         peg = p.peg_ratio
-        if 0 < peg <= 0.5:
+        if peg is not None and 0 < peg <= 0.5:
             score += 5
-        elif peg <= 1.0:
+        elif peg is not None and peg <= 1.0:
             score += 4
-        elif peg <= 1.5:
+        elif peg is not None and peg <= 1.5:
             score += 3
-        elif peg <= 2.0:
+        elif peg is not None and peg <= 2.0:
             score += 1
 
         # EV/EBITDA
         ev = p.ev_ebitda
-        if 0 < ev <= 8:
+        if ev is not None and 0 < ev <= 8:
             score += 3
-        elif ev <= 12:
+        elif ev is not None and ev <= 12:
             score += 2
-        elif ev <= 18:
+        elif ev is not None and ev <= 18:
             score += 1
 
         # FCF yield
-        if p.fcf_yield > 5:
+        fcf = p.fcf_yield
+        if fcf is not None and fcf > 5:
             score += 2
-        elif p.fcf_yield > 3:
+        elif fcf is not None and fcf > 3:
             score += 1
 
         return min(20, score)
@@ -635,54 +689,58 @@ class FundamentalScorer:
         """Score 0-25: ROE(0-8), ROCE(0-8), NPM(0-5), OPM(0-4)."""
         score = 0
 
-        # ROE
-        if p.roe >= 25:
+        # ROE — None means not available, contributes 0
+        roe = p.roe
+        if roe is not None and roe >= 25:
             score += 8
-        elif p.roe >= 20:
+        elif roe is not None and roe >= 20:
             score += 7
-        elif p.roe >= 15:
+        elif roe is not None and roe >= 15:
             score += 5
-        elif p.roe >= 12:
+        elif roe is not None and roe >= 12:
             score += 3
-        elif p.roe >= 8:
+        elif roe is not None and roe >= 8:
             score += 1
 
         # ROCE (skip for banking)
+        roce = p.roce
         if not p.is_banking:
-            if p.roce >= 25:
+            if roce is not None and roce >= 25:
                 score += 8
-            elif p.roce >= 20:
+            elif roce is not None and roce >= 20:
                 score += 7
-            elif p.roce >= 15:
+            elif roce is not None and roce >= 15:
                 score += 5
-            elif p.roce >= 12:
+            elif roce is not None and roce >= 12:
                 score += 3
-            elif p.roce >= 8:
+            elif roce is not None and roce >= 8:
                 score += 1
         else:
             # Give banking stocks average ROCE score
             score += 4
 
         # NPM
-        if p.npm >= 20:
+        npm = p.npm
+        if npm is not None and npm >= 20:
             score += 5
-        elif p.npm >= 15:
+        elif npm is not None and npm >= 15:
             score += 4
-        elif p.npm >= 10:
+        elif npm is not None and npm >= 10:
             score += 3
-        elif p.npm >= 5:
+        elif npm is not None and npm >= 5:
             score += 2
-        elif p.npm > 0:
+        elif npm is not None and npm > 0:
             score += 1
 
         # OPM
-        if p.opm >= 25:
+        opm = p.opm
+        if opm is not None and opm >= 25:
             score += 4
-        elif p.opm >= 20:
+        elif opm is not None and opm >= 20:
             score += 3
-        elif p.opm >= 15:
+        elif opm is not None and opm >= 15:
             score += 2
-        elif p.opm >= 10:
+        elif opm is not None and opm >= 10:
             score += 1
 
         return min(25, score)
@@ -800,7 +858,7 @@ class FundamentalScorer:
         # ROCE consistency
         if p.roce_consistent_above_15:
             score += 4
-        elif p.roce >= 15:
+        elif (p.roce or 0) >= 15:
             score += 2
 
         # Revenue growth consistency
@@ -859,15 +917,15 @@ class FundamentalScorer:
         red = []
 
         # Green flags
-        if p.roe >= 20:
+        if (p.roe or 0) >= 20:
             green.append(f"High ROE: {p.roe:.1f}%")
-        if p.roce >= 20 and not p.is_banking:
+        if (p.roce or 0) >= 20 and not p.is_banking:
             green.append(f"High ROCE: {p.roce:.1f}%")
         if p.debt_to_equity < 0.1 and not p.is_banking:
             green.append("Debt-free")
         if p.profit_growth_3y >= 20:
             green.append(f"Strong profit growth: {p.profit_growth_3y:.0f}% CAGR")
-        if p.free_cash_flow > 0 and p.fcf_yield > 3:
+        if p.free_cash_flow > 0 and (p.fcf_yield or 0) > 3:
             green.append(f"Strong FCF yield: {p.fcf_yield:.1f}%")
         if p.roce_consistent_above_15:
             green.append("Consistent ROCE >15% (5 years)")
@@ -879,19 +937,19 @@ class FundamentalScorer:
             green.append("Quarterly earnings accelerating")
         if p.dividend_yield >= 3:
             green.append(f"High dividend yield: {p.dividend_yield:.1f}%")
-        if 0 < p.peg_ratio <= 1:
+        if p.peg_ratio and 0 < p.peg_ratio <= 1:
             green.append(f"Attractive PEG: {p.peg_ratio:.1f}")
         if p.no_loss_years_5:
             green.append("No loss in last 5 years")
 
         # Red flags
-        if p.pe_ratio > 80:
+        if p.pe_ratio is not None and p.pe_ratio > 80:
             red.append(f"Very high PE: {p.pe_ratio:.0f}")
-        if p.pe_ratio < 0:
+        if p.pe_ratio is not None and p.pe_ratio < 0:
             red.append("Loss-making (negative PE)")
         if p.debt_to_equity > 2.0 and not p.is_banking:
             red.append(f"Over-leveraged: D/E {p.debt_to_equity:.1f}")
-        if p.roe < 8 and p.roe != 0:
+        if p.roe is not None and p.roe < 8 and p.roe != 0:
             red.append(f"Low ROE: {p.roe:.1f}%")
         if p.profit_growth_3y < 0:
             red.append(f"Declining profits: {p.profit_growth_3y:.0f}%")

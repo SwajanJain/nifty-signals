@@ -26,35 +26,38 @@ class ValueScreen(BaseScreen):
         met = []
         failed = []
         score = 0
+        pe = p.pe_ratio or 0
+        pb = p.pb_ratio or 0
+        eps = p.eps_ttm or 0
 
         # 1. P/E < 15
-        if 0 < p.pe_ratio <= 10:
-            met.append(f"PE {p.pe_ratio:.1f} (excellent)")
+        if 0 < pe <= 10:
+            met.append(f"PE {pe:.1f} (excellent)")
             score += 25
-        elif 0 < p.pe_ratio <= 12:
-            met.append(f"PE {p.pe_ratio:.1f} (good)")
+        elif 0 < pe <= 12:
+            met.append(f"PE {pe:.1f} (good)")
             score += 20
-        elif 0 < p.pe_ratio <= 15:
-            met.append(f"PE {p.pe_ratio:.1f}")
+        elif 0 < pe <= 15:
+            met.append(f"PE {pe:.1f}")
             score += 15
-        elif 0 < p.pe_ratio <= 20:
-            met.append(f"PE {p.pe_ratio:.1f} (slightly high)")
+        elif 0 < pe <= 20:
+            met.append(f"PE {pe:.1f} (slightly high)")
             score += 5
         else:
-            failed.append(f"PE {p.pe_ratio:.1f} > 15")
+            failed.append(f"PE {pe:.1f} > 15")
 
         # 2. P/B < 2.0
-        if 0 < p.pb_ratio <= 1.0:
-            met.append(f"PB {p.pb_ratio:.1f} (deep value)")
+        if 0 < pb <= 1.0:
+            met.append(f"PB {pb:.1f} (deep value)")
             score += 20
-        elif 0 < p.pb_ratio <= 1.5:
-            met.append(f"PB {p.pb_ratio:.1f} (good)")
+        elif 0 < pb <= 1.5:
+            met.append(f"PB {pb:.1f} (good)")
             score += 15
-        elif 0 < p.pb_ratio <= 2.0:
-            met.append(f"PB {p.pb_ratio:.1f}")
+        elif 0 < pb <= 2.0:
+            met.append(f"PB {pb:.1f}")
             score += 10
         else:
-            failed.append(f"PB {p.pb_ratio:.1f} > 2.0")
+            failed.append(f"PB {pb:.1f} > 2.0")
 
         # 3. D/E < 0.5
         if not p.is_banking:
@@ -95,9 +98,9 @@ class ValueScreen(BaseScreen):
 
         # 6. Graham intrinsic value margin of safety
         # Intrinsic Value = EPS × (8.5 + 2 × growth_rate)
-        if p.eps_ttm > 0 and p.eps_growth_3y > 0:
+        if eps > 0 and p.eps_growth_3y > 0:
             capped_growth = min(p.eps_growth_3y, 20)
-            graham_value = p.eps_ttm * (8.5 + 1.5 * capped_growth)
+            graham_value = eps * (8.5 + 1.5 * capped_growth)
             margin = (graham_value - p.current_price) / graham_value * 100 if graham_value > 0 else 0
             if margin > 30:
                 met.append(f"Margin of safety {margin:.0f}% (excellent)")
@@ -113,8 +116,8 @@ class ValueScreen(BaseScreen):
 
         # Hard pass criteria
         passes = (
-            (0 < p.pe_ratio <= 20)
-            and (p.pb_ratio <= 2.5 or p.pb_ratio == 0)
+            (0 < pe <= 20)
+            and (pb <= 2.5 or pb == 0)
             and (p.debt_to_equity <= 0.5 or p.is_banking)
             and p.no_loss_years_5
             and p.market_cap >= 5000
@@ -130,10 +133,10 @@ class ValueScreen(BaseScreen):
             criteria_met=met,
             criteria_failed=failed,
             key_metrics={
-                'PE': p.pe_ratio,
-                'PB': p.pb_ratio,
+                'PE': pe,
+                'PB': pb,
                 'D/E': p.debt_to_equity,
-                'ROE': p.roe,
+                'ROE': p.roe or 0,
                 'Mkt Cap': f"{p.market_cap:,.0f} Cr",
             },
         )

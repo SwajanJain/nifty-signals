@@ -27,6 +27,8 @@ class GrowthScreen(BaseScreen):
         met = []
         failed = []
         score = 0
+        peg = p.peg_ratio or 0
+        roe = p.roe or 0
 
         # 1. EPS CAGR 3Y > 20%
         if p.eps_growth_3y >= 30:
@@ -55,17 +57,17 @@ class GrowthScreen(BaseScreen):
             failed.append(f"Revenue growth {p.revenue_growth_3y:.0f}% < 15%")
 
         # 3. PEG ratio < 1.5
-        if 0 < p.peg_ratio <= 0.5:
-            met.append(f"PEG {p.peg_ratio:.1f} (very attractive)")
+        if 0 < peg <= 0.5:
+            met.append(f"PEG {peg:.1f} (very attractive)")
             score += 20
-        elif 0 < p.peg_ratio <= 1.0:
-            met.append(f"PEG {p.peg_ratio:.1f} (good)")
+        elif 0 < peg <= 1.0:
+            met.append(f"PEG {peg:.1f} (good)")
             score += 15
-        elif 0 < p.peg_ratio <= 1.5:
-            met.append(f"PEG {p.peg_ratio:.1f}")
+        elif 0 < peg <= 1.5:
+            met.append(f"PEG {peg:.1f}")
             score += 10
         else:
-            failed.append(f"PEG {p.peg_ratio:.1f} > 1.5")
+            failed.append(f"PEG {peg:.1f} > 1.5")
 
         # 4. Quarterly earnings acceleration
         if p.qtr_eps_acceleration and p.consecutive_qtr_growth >= 4:
@@ -91,24 +93,24 @@ class GrowthScreen(BaseScreen):
             failed.append(f"FII declining: {p.fii_holding_change_1y:.1f}%")
 
         # 6. Profitability (ROE > 12%)
-        if p.roe >= 20:
-            met.append(f"Strong ROE: {p.roe:.1f}%")
+        if roe >= 20:
+            met.append(f"Strong ROE: {roe:.1f}%")
             score += 10
-        elif p.roe >= 15:
-            met.append(f"Good ROE: {p.roe:.1f}%")
+        elif roe >= 15:
+            met.append(f"Good ROE: {roe:.1f}%")
             score += 7
-        elif p.roe >= 12:
-            met.append(f"Adequate ROE: {p.roe:.1f}%")
+        elif roe >= 12:
+            met.append(f"Adequate ROE: {roe:.1f}%")
             score += 5
         else:
-            failed.append(f"ROE {p.roe:.1f}% < 12%")
+            failed.append(f"ROE {roe:.1f}% < 12%")
 
         # Hard pass criteria
         passes = (
             p.eps_growth_3y >= 20
             and p.revenue_growth_3y >= 15
-            and 0 < p.peg_ratio <= 1.5
-            and p.roe >= 12
+            and 0 < peg <= 1.5
+            and roe >= 12
         )
 
         return ScreenResult(
@@ -123,8 +125,8 @@ class GrowthScreen(BaseScreen):
             key_metrics={
                 'EPS Growth': f"{p.eps_growth_3y:.0f}%",
                 'Rev Growth': f"{p.revenue_growth_3y:.0f}%",
-                'PEG': p.peg_ratio,
-                'ROE': f"{p.roe:.1f}%",
+                'PEG': peg,
+                'ROE': f"{roe:.1f}%",
                 'Qtr Growth': p.consecutive_qtr_growth,
             },
         )

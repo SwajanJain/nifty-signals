@@ -5,6 +5,11 @@ from .growth import GrowthScreen
 from .quality import QualityScreen
 from .garp import GARPScreen
 from .dividend import DividendScreen
+from .magic_formula import MagicFormulaScreen
+from .canslim import CANSLIMScreen
+from .coffee_can import CoffeeCanScreen
+from .compounder import CompounderScreen
+from .multibagger import MultibaggerScreen
 
 SCREENS = {
     'value': ValueScreen,
@@ -12,6 +17,11 @@ SCREENS = {
     'quality': QualityScreen,
     'garp': GARPScreen,
     'dividend': DividendScreen,
+    'magic_formula': MagicFormulaScreen,
+    'canslim': CANSLIMScreen,
+    'coffee_can': CoffeeCanScreen,
+    'compounder': CompounderScreen,
+    'multibagger': MultibaggerScreen,
 }
 
 

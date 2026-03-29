@@ -8,3 +8,4 @@ from .models import (
 )
 from .screener_fetcher import ScreenerFetcher
 from .scorer import ProfileBuilder, FundamentalScorer
+from .inflection import InflectionDetector

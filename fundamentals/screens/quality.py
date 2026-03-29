@@ -27,26 +27,29 @@ class QualityScreen(BaseScreen):
         met = []
         failed = []
         score = 0
+        roce = p.roce or 0
+        roe = p.roe or 0
+        npm = p.npm or 0
 
         # 1. ROCE > 15% consistently (all 5 years)
         if not p.is_banking:
-            if p.roce_consistent_above_15 and p.roce >= 20:
-                met.append(f"ROCE {p.roce:.1f}% (consistent >15%, currently >20%)")
+            if p.roce_consistent_above_15 and roce >= 20:
+                met.append(f"ROCE {roce:.1f}% (consistent >15%, currently >20%)")
                 score += 25
             elif p.roce_consistent_above_15:
-                met.append(f"ROCE {p.roce:.1f}% (consistent >15%)")
+                met.append(f"ROCE {roce:.1f}% (consistent >15%)")
                 score += 20
-            elif p.roce >= 15:
-                met.append(f"ROCE {p.roce:.1f}% (current >15%, not fully consistent)")
+            elif roce >= 15:
+                met.append(f"ROCE {roce:.1f}% (current >15%, not fully consistent)")
                 score += 10
             else:
-                failed.append(f"ROCE {p.roce:.1f}% < 15%")
+                failed.append(f"ROCE {roce:.1f}% < 15%")
         else:
-            if p.roe >= 15:
-                met.append(f"ROE {p.roe:.1f}% (banking)")
+            if roe >= 15:
+                met.append(f"ROE {roe:.1f}% (banking)")
                 score += 15
             else:
-                failed.append(f"ROE {p.roe:.1f}% < 15% (banking)")
+                failed.append(f"ROE {roe:.1f}% < 15% (banking)")
 
         # 2. Revenue growth > 10% consistently
         if p.revenue_growing_consistently and p.revenue_growth_3y >= 15:
@@ -105,14 +108,14 @@ class QualityScreen(BaseScreen):
 
         # 6. NPM stable or improving
         if p.npm_stable_or_improving:
-            met.append(f"NPM stable/improving ({p.npm:.1f}%)")
+            met.append(f"NPM stable/improving ({npm:.1f}%)")
             score += 15
         else:
             failed.append("NPM declining")
 
         # Hard pass criteria
         passes = (
-            (p.roce >= 15 or p.is_banking)
+            (roce >= 15 or p.is_banking)
             and p.revenue_growth_3y >= 10
             and (p.debt_to_equity <= 0.5 or p.is_banking)
             and p.cash_flow_positive_years >= 3
@@ -128,10 +131,10 @@ class QualityScreen(BaseScreen):
             criteria_met=met,
             criteria_failed=failed,
             key_metrics={
-                'ROCE': f"{p.roce:.1f}%",
+                'ROCE': f"{roce:.1f}%",
                 'Rev Growth': f"{p.revenue_growth_3y:.0f}%",
                 'D/E': p.debt_to_equity,
-                'NPM': f"{p.npm:.1f}%",
+                'NPM': f"{npm:.1f}%",
                 'OCF Years': f"{p.cash_flow_positive_years}/5",
             },
         )

@@ -174,11 +174,30 @@ SCREENER_TIMEOUT = 30
 
 # Symbol mapping for screener.in URL encoding
 SCREENER_SYMBOL_MAP = {
+    # URL-encoding for special characters
     'M&M': 'M%26M',
     'L&TFH': 'L%26TFH',
-    'MCDOWELL-N': 'MCDOWELL-N',
     'BAJAJ-AUTO': 'BAJAJ-AUTO',
     'J&KBANK': 'J%26KBANK',
+    # NSE symbol → screener.in slug (renames, different tickers)
+    'AEGISCHEM': 'AEGISLOG',
+    'AMARAJABAT': 'ARE%26M',
+    'CENTURYTEX': 'ABREL',
+    'GMRINFRA': 'GMRAIRPORT',
+    'HBLPOWER': 'HBLENGINE',
+    'KALPATPOWR': 'KPIL',
+    'LAXMIMACH': 'LMW',
+    'LTIM': 'LTM',
+    'MCDOWELL-N': 'UNITDSPR',
+    'MINDAIND': 'UNOMINDA',
+    'MISHRA': 'MIDHANI',
+    'MMFIN': 'M%26MFIN',
+    'NMDCSTEEL': 'NSLNISP',
+    'ONE97': 'PAYTM',
+    'SUVENPHAR': 'COHANCE',
+    'SWANENERGY': 'SWANCORP',
+    'TATAMOTORS': 'TMCV',
+    'ZOMATO': 'ETERNAL',
 }
 
 FUNDAMENTAL_SCORE_WEIGHTS = {

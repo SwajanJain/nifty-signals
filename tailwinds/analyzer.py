@@ -508,18 +508,51 @@ class CompositeAnalyzer:
         fundamental_score: FundamentalScore,
         tailwind_score: TailwindScore,
         profile: Optional[FundamentalProfile] = None,
+        valuation_result=None,
     ) -> CompositeScore:
         """Compute weighted composite score.
 
         Components (each counted exactly once):
         - Internal (fundamental ex-valuation): 50% weight, normalized 0-80 → 0-100
         - External (tailwind): 30% weight, already 0-100
-        - Valuation: 20% weight, normalized 0-20 → 0-100
+        - Valuation: 20% weight — uses DCF/DDM/Monte Carlo fair value when available,
+          falls back to fundamental valuation_score (0-20 → 0-100)
+
+        Args:
+            valuation_result: Optional ValuationResult from fundamentals.valuation models.
+                If provided, its margin_of_safety drives the valuation component.
         """
         # Separate valuation from other fundamental components to avoid double-counting
         fundamental_ex_valuation = fundamental_score.total_score - fundamental_score.valuation_score
         internal_normalized = fundamental_ex_valuation / 80 * 100 if fundamental_ex_valuation > 0 else 0
-        valuation_normalized = fundamental_score.valuation_score * 5  # 0-20 → 0-100
+
+        # Valuation component: prefer model-based fair value when available
+        valuation_signal = ""
+        valuation_fair_value = 0.0
+        valuation_mos = 0.0
+
+        if valuation_result and valuation_result.fair_value > 0:
+            # Map margin of safety to 0-100 score
+            mos = valuation_result.margin_of_safety_pct
+            if mos >= 40:
+                valuation_normalized = 100
+            elif mos >= 20:
+                valuation_normalized = 80
+            elif mos >= 10:
+                valuation_normalized = 65
+            elif mos >= 0:
+                valuation_normalized = 50
+            elif mos >= -10:
+                valuation_normalized = 35
+            elif mos >= -20:
+                valuation_normalized = 20
+            else:
+                valuation_normalized = 5
+            valuation_signal = valuation_result.signal
+            valuation_fair_value = valuation_result.fair_value
+            valuation_mos = mos
+        else:
+            valuation_normalized = fundamental_score.valuation_score * 5  # 0-20 → 0-100
 
         composite = int(round(
             self.internal_weight * internal_normalized
@@ -536,6 +569,9 @@ class CompositeAnalyzer:
             fundamental_grade=fundamental_score.grade,
             tailwind_score=tailwind_score.total_score,
             tailwind_grade=tailwind_score.grade,
+            valuation_signal=valuation_signal,
+            valuation_fair_value=valuation_fair_value,
+            valuation_margin_of_safety=valuation_mos,
             composite_score=composite,
             composite_grade=self._grade(composite),
         )

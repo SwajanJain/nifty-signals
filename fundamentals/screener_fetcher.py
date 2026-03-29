@@ -303,7 +303,10 @@ class ScreenerFetcher:
         if not ratios:
             ratios = self._parse_ratios_from_warehouses(soup)
 
-        # Parse high/low
+        # Parse 52-week high/low — try multiple strategies
+        high_52w, low_52w = None, None
+
+        # Strategy 1: Find "High / Low" text node and parse sibling/parent
         high_low = soup.find(string=lambda t: t and 'High / Low' in str(t) if t else False)
         if high_low:
             parent = high_low.find_parent()
@@ -311,17 +314,47 @@ class ScreenerFetcher:
                 nums = parent.get_text()
                 parts = nums.replace('High / Low', '').strip().split('/')
                 if len(parts) == 2:
-                    ratios['high_52w'] = self._clean_number(parts[0]) or 0
-                    ratios['low_52w'] = self._clean_number(parts[1]) or 0
+                    high_52w = self._clean_number(parts[0])
+                    low_52w = self._clean_number(parts[1])
 
-        # Parse sector/industry from company info
+        # Strategy 2: Look for data-warehouse attribute or number elements near "High"
+        if not high_52w:
+            for li in soup.find_all('li'):
+                text = li.get_text(strip=True)
+                if 'high' in text.lower() and '/' in text:
+                    import re
+                    nums = re.findall(r'[\d,]+\.?\d*', text.replace(',', ''))
+                    if len(nums) >= 2:
+                        high_52w = self._clean_number(nums[0])
+                        low_52w = self._clean_number(nums[1])
+                        break
+
+        if high_52w is not None:
+            ratios['high_52w'] = high_52w
+        if low_52w is not None:
+            ratios['low_52w'] = low_52w
+
+        # Parse sector/industry from company info — try multiple strategies
         sector_el = soup.find('a', href=lambda h: h and '/sector/' in h if h else False)
         if sector_el:
             ratios['sector'] = sector_el.get_text(strip=True)
+        else:
+            # Fallback: look in breadcrumb or meta tags
+            for a_tag in soup.find_all('a'):
+                href = a_tag.get('href', '')
+                if '/sector/' in href:
+                    ratios['sector'] = a_tag.get_text(strip=True)
+                    break
 
         industry_el = soup.find('a', href=lambda h: h and '/industry/' in h if h else False)
         if industry_el:
             ratios['industry'] = industry_el.get_text(strip=True)
+        else:
+            for a_tag in soup.find_all('a'):
+                href = a_tag.get('href', '')
+                if '/industry/' in href:
+                    ratios['industry'] = a_tag.get_text(strip=True)
+                    break
 
         return ratios
 
