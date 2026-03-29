@@ -9,6 +9,10 @@ Critical insights:
 - If it doesn't work walk-forward, it won't work live
 
 Rule: Trust walk-forward results, distrust traditional backtests.
+
+WARNING: Survivorship bias — backtests use current index constituents,
+not historical. Stocks that were delisted or removed from the index are
+excluded, which may overstate historical returns.
 """
 
 from typing import Dict, List, Optional, Tuple, Callable
@@ -362,43 +366,57 @@ class WalkForwardBacktester:
         signals: pd.DataFrame,
         initial_capital: float
     ) -> List[Dict]:
-        """Simulate trades from signals."""
+        """Simulate trades from signals with 1-bar entry delay to avoid look-ahead bias."""
         trades = []
         position = None
         capital = initial_capital
+        pending_entry = False
+        pending_exit = False
 
         # Merge signals with data
         merged = data.merge(signals[['date', 'signal']], on='date', how='left')
         merged['signal'] = merged['signal'].fillna(0)
 
         for idx, row in merged.iterrows():
-            if position is None:
-                # Look for entry
+            # Signal on bar N -> entry on bar N+1 open (no look-ahead bias)
+            # Execute pending entry from previous bar's signal
+            if pending_entry and position is None:
+                entry_price = row['open'] if 'open' in row.index else row['close']
+                position = {
+                    'entry_date': row['date'],
+                    'entry_price': entry_price,
+                    'direction': 'LONG',
+                    'size': capital * 0.1 / entry_price  # 10% position
+                }
+                pending_entry = False
+
+            # Execute pending exit from previous bar's signal
+            if pending_exit and position is not None:
+                exit_price = row['open'] if 'open' in row.index else row['close']
+                pnl = (exit_price - position['entry_price']) * position['size']
+                pnl_pct = (exit_price - position['entry_price']) / position['entry_price'] * 100
+
+                trades.append({
+                    'entry_date': position['entry_date'],
+                    'exit_date': row['date'],
+                    'entry_price': position['entry_price'],
+                    'exit_price': exit_price,
+                    'pnl': pnl,
+                    'pnl_pct': pnl_pct,
+                    'direction': position['direction']
+                })
+
+                capital += pnl
+                position = None
+                pending_exit = False
+
+            # Record signals — execution deferred to next bar
+            if position is None and not pending_entry:
                 if row['signal'] > 0:  # Buy signal
-                    position = {
-                        'entry_date': row['date'],
-                        'entry_price': row['close'],
-                        'direction': 'LONG',
-                        'size': capital * 0.1 / row['close']  # 10% position
-                    }
-            else:
-                # Look for exit
+                    pending_entry = True
+            elif position is not None and not pending_exit:
                 if row['signal'] < 0:  # Sell signal
-                    pnl = (row['close'] - position['entry_price']) * position['size']
-                    pnl_pct = (row['close'] - position['entry_price']) / position['entry_price'] * 100
-
-                    trades.append({
-                        'entry_date': position['entry_date'],
-                        'exit_date': row['date'],
-                        'entry_price': position['entry_price'],
-                        'exit_price': row['close'],
-                        'pnl': pnl,
-                        'pnl_pct': pnl_pct,
-                        'direction': position['direction']
-                    })
-
-                    capital += pnl
-                    position = None
+                    pending_exit = True
 
         return trades
 

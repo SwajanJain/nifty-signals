@@ -42,17 +42,34 @@ class Trade:
     max_favorable: float = 0.0  # Max favorable excursion
     max_adverse: float = 0.0    # Max adverse excursion (drawdown)
 
-    def calculate_pnl(self):
-        """Calculate PnL when trade is closed."""
+    def calculate_pnl(self, transaction_cost_bps: float = 5.0, slippage_bps: float = 5.0):
+        """Calculate PnL when trade is closed, including transaction costs and slippage.
+
+        Transaction costs cover: brokerage, STT, GST, stamp duty, SEBI turnover fee.
+        Slippage models market impact on exit.
+        """
         if self.exit_price is None:
             return
 
+        # Apply slippage to exit price (adverse direction)
         if self.direction == "LONG":
-            self.pnl = (self.exit_price - self.entry_price) * self.position_size
-            self.pnl_percent = (self.exit_price - self.entry_price) / self.entry_price * 100
+            effective_exit = self.exit_price * (1 - slippage_bps / 10000)
         else:
-            self.pnl = (self.entry_price - self.exit_price) * self.position_size
-            self.pnl_percent = (self.entry_price - self.exit_price) / self.entry_price * 100
+            effective_exit = self.exit_price * (1 + slippage_bps / 10000)
+
+        # Compute raw PnL
+        if self.direction == "LONG":
+            raw_pnl = (effective_exit - self.entry_price) * self.position_size
+            self.pnl_percent = (effective_exit - self.entry_price) / self.entry_price * 100
+        else:
+            raw_pnl = (self.entry_price - effective_exit) * self.position_size
+            self.pnl_percent = (self.entry_price - effective_exit) / self.entry_price * 100
+
+        # Deduct transaction costs (both sides)
+        entry_value = self.entry_price * self.position_size
+        exit_value = effective_exit * self.position_size
+        txn_cost = (entry_value + exit_value) * transaction_cost_bps / 10000
+        self.pnl = raw_pnl - txn_cost
 
         if self.entry_date and self.exit_date:
             self.holding_days = (self.exit_date - self.entry_date).days
@@ -89,6 +106,10 @@ class BacktestResult:
     # By exit type
     exits_by_type: Dict[str, int] = field(default_factory=dict)
 
+    # Costs
+    total_transaction_costs: float = 0.0
+    total_slippage_cost: float = 0.0
+
 
 class BacktestEngine:
     """
@@ -100,7 +121,15 @@ class BacktestEngine:
     - Trailing stops
     - Time-based exits
     - Position sizing based on risk
+    - Transaction costs (brokerage + STT + GST + stamp + SEBI)
+    - Slippage modeling
     """
+
+    # Transaction costs per side (bps) — conservative estimate for Indian markets:
+    # ~3-5 bps brokerage + ~1 bp STT + ~1 bp GST/stamp/SEBI ≈ 5 bps per side
+    TRANSACTION_COST_BPS = 5.0  # per side
+    # Slippage per side (bps) — conservative for liquid Nifty 500 stocks
+    SLIPPAGE_BPS = 5.0  # per side
 
     def __init__(
         self,
@@ -132,6 +161,7 @@ class BacktestEngine:
         self.trailing_activation = trailing_activation
         self.trailing_distance = trailing_distance
         self.partial_exit_pct = partial_exit_pct
+        self.total_transaction_costs = 0.0
 
         self.trades: List[Trade] = []
         self.equity_curve: List[float] = [initial_capital]
@@ -173,8 +203,14 @@ class BacktestEngine:
                     continue
                 entry_date = future_dates[0]
 
-            # Create trade
-            entry_price = signal.get('entry_price', df.loc[entry_date, 'close'])
+            # Create trade — apply slippage to entry price
+            raw_entry = signal.get('entry_price', df.loc[entry_date, 'close'])
+            direction = signal.get('direction', 'LONG')
+            # Slippage: buy at higher price, sell at lower price
+            if direction == 'LONG':
+                entry_price = raw_entry * (1 + self.SLIPPAGE_BPS / 10000)
+            else:
+                entry_price = raw_entry * (1 - self.SLIPPAGE_BPS / 10000)
             stop_loss = signal['stop_loss']
             risk_per_share = abs(entry_price - stop_loss)
 
