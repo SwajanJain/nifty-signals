@@ -237,19 +237,25 @@ class PositionSizer:
         self,
         entry_price: float,
         stop_loss: float,
-        regime_multiplier: float = 1.0
+        regime_multiplier: float = 1.0,
+        adv_value: float = 0.0,
+        current_portfolio_heat: float = 0.0,
     ) -> Dict:
         """
-        Calculate position size based on risk.
+        Calculate position size based on risk, liquidity, and portfolio heat.
 
         Args:
             entry_price: Entry price
             stop_loss: Stop loss price
             regime_multiplier: Adjust size based on market regime (0-1)
+            adv_value: Average Daily Volume in value (INR). 0 = no ADV check.
+            current_portfolio_heat: Current total portfolio risk % (0-100).
 
         Returns:
             Dict with position sizing details
         """
+        from config import RISK_CONFIG
+
         # Calculate risk per share
         risk_per_share = abs(entry_price - stop_loss)
 
@@ -275,22 +281,58 @@ class PositionSizer:
         # Take the smaller of the two
         shares = min(shares_by_risk, shares_by_position)
 
+        # ADV liquidity check: cap position at max_adv_pct of ADV
+        liquidity_constrained = False
+        max_adv_pct = RISK_CONFIG.get('max_adv_pct', 2.0) / 100
+        if adv_value > 0:
+            max_by_adv = int(adv_value * max_adv_pct / entry_price)
+            if max_by_adv > 0 and shares > max_by_adv:
+                shares = max_by_adv
+                liquidity_constrained = True
+
+        # Portfolio heat enforcement: cap total risk at max_portfolio_heat
+        max_portfolio_heat = RISK_CONFIG.get('max_portfolio_heat', 6.0)
+        heat_constrained = False
+        if current_portfolio_heat > 0:
+            remaining_heat = max(0, max_portfolio_heat - current_portfolio_heat)
+            max_risk_amount = self.capital * (remaining_heat / 100)
+            if max_risk_amount <= 0:
+                return {
+                    'shares': 0,
+                    'position_value': 0,
+                    'risk_amount': 0,
+                    'error': f'Portfolio heat {current_portfolio_heat:.1f}% already at max {max_portfolio_heat}%',
+                    'heat_constrained': True,
+                }
+            max_shares_by_heat = int(max_risk_amount / risk_per_share)
+            if shares > max_shares_by_heat:
+                shares = max_shares_by_heat
+                heat_constrained = True
+
         # Round to lot size (for F&O stocks, typically 1 for cash)
-        # For simplicity, using 1 as lot size
         shares = max(1, shares)
 
         position_value = shares * entry_price
         actual_risk = shares * risk_per_share
         actual_risk_pct = actual_risk / self.capital
 
-        return {
+        result = {
             'shares': shares,
             'position_value': round(position_value, 2),
             'risk_amount': round(actual_risk, 2),
             'risk_percent': round(actual_risk_pct * 100, 2),
             'risk_per_share': round(risk_per_share, 2),
-            'regime_multiplier': regime_multiplier
+            'regime_multiplier': regime_multiplier,
+            'liquidity_constrained': liquidity_constrained,
+            'heat_constrained': heat_constrained,
         }
+
+        if liquidity_constrained:
+            result['warning'] = f'Position capped at {max_adv_pct*100:.0f}% of ADV ({adv_value:,.0f})'
+        if heat_constrained:
+            result['warning'] = f'Position reduced: portfolio heat would exceed {max_portfolio_heat}%'
+
+        return result
 
     def calculate_targets(
         self,

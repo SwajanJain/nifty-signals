@@ -43,6 +43,7 @@ class VaRResult:
     confidence: float = 0.95
     method: str = 'historical'
     period_days: int = 1          # Holding period
+    warnings: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -140,8 +141,12 @@ class PortfolioRiskCalculator:
         conf = confidence or self.confidence
         returns = returns.dropna()
 
-        if len(returns) < 30:
+        if len(returns) < 60:
             return VaRResult(confidence=conf, method=self.method)
+
+        warnings = []
+        if len(returns) < 252:
+            warnings.append(f"VaR computed with {len(returns)} observations (< 252 recommended)")
 
         if self.method == 'historical':
             var_pct = self._historical_var(returns, conf)
@@ -150,7 +155,7 @@ class PortfolioRiskCalculator:
 
         cvar_pct = self._calculate_cvar(returns, var_pct)
 
-        return VaRResult(
+        result = VaRResult(
             var_pct=round(abs(var_pct) * 100, 2),
             var_amount=round(abs(var_pct) * position_value, 2),
             cvar_pct=round(abs(cvar_pct) * 100, 2),
@@ -158,6 +163,9 @@ class PortfolioRiskCalculator:
             confidence=conf,
             method=self.method,
         )
+        if warnings:
+            result.warnings = warnings
+        return result
 
     def _historical_var(self, returns: pd.Series, confidence: float) -> float:
         """VaR via historical percentile."""
@@ -200,26 +208,28 @@ class PortfolioRiskCalculator:
             return VaRResult(confidence=self.confidence, method=self.method)
 
         returns_df = pd.DataFrame({s: returns_data[s] for s in common_syms}).dropna()
-        if len(returns_df) < 30:
+        if len(returns_df) < 60:
             return VaRResult(confidence=self.confidence, method=self.method)
 
         total_value = sum(positions[s] for s in common_syms)
         weights = np.array([positions[s] / total_value for s in common_syms])
 
-        # Covariance matrix
-        cov = returns_df.cov().values
-
-        # Portfolio variance: w' * Σ * w
-        port_var = np.dot(weights, np.dot(cov, weights))
-        port_std = np.sqrt(port_var)
-        port_mean = np.dot(weights, returns_df.mean().values)
-
-        from scipy.stats import norm
-        z = norm.ppf(1 - self.confidence)
-        var_pct = port_mean + z * port_std
-
-        # Portfolio CVaR via simulation of weighted returns
+        # Portfolio weighted returns
         port_returns = returns_df.values @ weights
+
+        # Use configured method for portfolio VaR too (was always parametric before)
+        if self.method == 'historical':
+            var_pct = np.percentile(port_returns, (1 - self.confidence) * 100)
+        else:
+            # Parametric via covariance matrix
+            cov = returns_df.cov().values
+            port_var = np.dot(weights, np.dot(cov, weights))
+            port_std = np.sqrt(port_var)
+            port_mean = np.dot(weights, returns_df.mean().values)
+            from scipy.stats import norm
+            z = norm.ppf(1 - self.confidence)
+            var_pct = port_mean + z * port_std
+
         cvar_pct = self._calculate_cvar(pd.Series(port_returns), var_pct)
 
         return VaRResult(
