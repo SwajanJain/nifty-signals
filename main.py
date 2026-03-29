@@ -32,6 +32,14 @@ app = typer.Typer(
 console = Console()
 
 
+def _print_footer():
+    """Print standard disclaimer and data source attribution."""
+    console.print(
+        "\n[dim]Data: screener.in (fundamentals), Yahoo Finance (prices) | "
+        "Not investment advice — verify independently before trading[/dim]"
+    )
+
+
 @app.command()
 def scan(
     timeframe: str = typer.Option(
@@ -93,6 +101,7 @@ def scan(
     else:
         output.display_top_picks(signals, top_n=top)
         console.print("\n[dim]Use --all to see all signals including HOLD[/dim]")
+    _print_footer()
 
     # Export if requested
     if export:
@@ -322,6 +331,8 @@ def enhanced_scan(
         for signal in high_score_skipped[:3]:
             console.print(f"  {signal.symbol}: Score {signal.total_score:+d} - {', '.join(signal.skip_reasons)}")
 
+    _print_footer()
+
 
 @app.command()
 def regime():
@@ -367,6 +378,8 @@ def regime():
     console.print(f"Strategies: {', '.join(strategy['strategies'])}")
     console.print(f"Notes: {strategy['notes']}")
 
+    _print_footer()
+
 
 @app.command()
 def sectors():
@@ -391,6 +404,7 @@ def sectors():
 
     report = print_sector_report(analysis)
     console.print(report)
+    _print_footer()
 
 
 @app.command()
@@ -424,6 +438,7 @@ def analyze_enhanced(
 
     report = print_enhanced_signal(signal)
     console.print(report)
+    _print_footer()
 
 
 @app.command()
@@ -557,6 +572,7 @@ def fundamental_scan(
     output.display_scan_results(scores, profiles, top_n=top)
 
     console.print(f"\n[dim]Total: {len(scores)} stocks scored | Showing top {min(top, len(scores))}[/dim]")
+    _print_footer()
 
 
 @app.command()
@@ -608,6 +624,7 @@ def fundamental_analyze(
     # Display
     output = FundamentalOutput()
     output.display_stock_analysis(profile, fs)
+    _print_footer()
 
 
 @app.command()
@@ -879,6 +896,8 @@ def full_analyze(
     else:
         console.print(f"\n[yellow]No sector mapping found for {symbol} - tailwind score unavailable.[/yellow]")
 
+    _print_footer()
+
 
 @app.command()
 def full_scan(
@@ -946,6 +965,7 @@ def full_scan(
     output.display_composite_scan(composites, top_n=top)
 
     console.print(f"\n[dim]Total: {len(composites)} stocks scored | Showing top {min(top, len(composites))}[/dim]")
+    _print_footer()
 
 
 # =============================================================================
@@ -974,13 +994,22 @@ def _load_imported_portfolio(path: Optional[str]):
     return load_portfolio(Path(path))
 
 
-def _build_fund_scorer(refresh_holdings: bool = False):
+def _build_fund_scorer(refresh_holdings: bool = False, market_regime: str = "normal"):
     from funds import FundScorer
     from funds.scorer import LiveFundamentalScoreProvider, LiveTailwindProvider
 
     return FundScorer(
         fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
         tailwind_provider=LiveTailwindProvider(),
+        market_regime=market_regime,
+    )
+
+
+def _build_nifty_index_researcher(refresh_holdings: bool = False, market_regime: str = "normal"):
+    from funds import NiftyIndexResearcher
+
+    return NiftyIndexResearcher(
+        scorer=_build_fund_scorer(refresh_holdings=refresh_holdings, market_regime=market_regime)
     )
 
 
@@ -1197,6 +1226,9 @@ def fund_scan(
     portfolio_file: Optional[str] = typer.Option(
         None, "--portfolio-file", help="CSV/JSON/CAS portfolio file for look-through overlap checks"
     ),
+    market_regime: str = typer.Option(
+        "normal", "--market-regime", help="Market regime: normal, weak, strong"
+    ),
 ):
     """
     Scan the curated fund universe and rank schemes by investability.
@@ -1216,7 +1248,7 @@ def fund_scan(
         console.print("[red]No schemes matched the requested filters.[/red]")
         raise typer.Exit(1)
 
-    scorer = _build_fund_scorer(refresh_holdings=refresh_holdings)
+    scorer = _build_fund_scorer(refresh_holdings=refresh_holdings, market_regime=market_regime)
     current_portfolio = _resolve_portfolio_schemes(universe, portfolio)
     imported = _load_imported_portfolio(portfolio_file)
     analyses = [scorer.analyze(scheme, current_portfolio=current_portfolio) for scheme in schemes]
@@ -1245,6 +1277,9 @@ def fund_analyze(
     portfolio_file: Optional[str] = typer.Option(
         None, "--portfolio-file", help="CSV/JSON/CAS portfolio file for look-through overlap checks"
     ),
+    market_regime: str = typer.Option(
+        "normal", "--market-regime", help="Market regime: normal, weak, strong"
+    ),
 ):
     """
     Deep analysis of a mutual fund or ETF.
@@ -1261,7 +1296,7 @@ def fund_analyze(
         console.print(f"[red]Could not find scheme: {scheme}[/red]")
         raise typer.Exit(1)
 
-    scorer = _build_fund_scorer(refresh_holdings=refresh_holdings)
+    scorer = _build_fund_scorer(refresh_holdings=refresh_holdings, market_regime=market_regime)
     current_portfolio = _resolve_portfolio_schemes(universe, portfolio)
     analysis = scorer.analyze(target, current_portfolio=current_portfolio)
     imported = _load_imported_portfolio(portfolio_file)
@@ -1280,6 +1315,9 @@ def fund_compare(
     ),
     refresh_holdings: bool = typer.Option(
         False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+    market_regime: str = typer.Option(
+        "normal", "--market-regime", help="Market regime: normal, weak, strong"
     ),
 ):
     """
@@ -1305,6 +1343,7 @@ def fund_compare(
     scorer = FundScorer(
         fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
         tailwind_provider=LiveTailwindProvider(),
+        market_regime=market_regime,
     )
     analyses = [scorer.analyze(target) for target in targets]
     FundOutput().display_comparison(analyses)
@@ -1316,6 +1355,9 @@ def theme_funds(
     top: int = typer.Option(8, "--top", "-n", help="Show top N matching thematic funds"),
     refresh_holdings: bool = typer.Option(
         False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+    market_regime: str = typer.Option(
+        "normal", "--market-regime", help="Market regime: normal, weak, strong"
     ),
 ):
     """
@@ -1333,6 +1375,7 @@ def theme_funds(
     scorer = FundScorer(
         fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
         tailwind_provider=LiveTailwindProvider(),
+        market_regime=market_regime,
     )
     analyses = [scorer.analyze(scheme) for scheme in schemes]
     analyses.sort(key=lambda a: a.overall_score, reverse=True)
@@ -1376,6 +1419,9 @@ def fund_review_template(
     refresh_holdings: bool = typer.Option(
         False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
     ),
+    market_regime: str = typer.Option(
+        "normal", "--market-regime", help="Market regime: normal, weak, strong"
+    ),
 ):
     """
     Build a structured review template for funds_research.json from the current analysis.
@@ -1393,10 +1439,81 @@ def fund_review_template(
     scorer = FundScorer(
         fundamentals_provider=LiveFundamentalScoreProvider(force_refresh=refresh_holdings),
         tailwind_provider=LiveTailwindProvider(),
+        market_regime=market_regime,
     )
     analysis = scorer.analyze(target)
     template = build_review_template(analysis)
     console.print_json(data=template)
+
+
+@app.command()
+def nifty_index_scan(
+    top: int = typer.Option(10, "--top", "-n", help="Show top N indices"),
+    family: Optional[str] = typer.Option(
+        None, "--family", "-f", help="Filter by family: sectoral, thematic, factor"
+    ),
+    theme: Optional[str] = typer.Option(
+        None, "--theme", "-t", help="Filter by index theme keyword"
+    ),
+    refresh_holdings: bool = typer.Option(
+        False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+    market_regime: str = typer.Option(
+        "normal", "--market-regime", help="Market regime: normal, weak, strong"
+    ),
+):
+    """
+    Scan curated Nifty indices using live proxy-fund holdings.
+
+    Examples:
+        python main.py nifty-index-scan
+        python main.py nifty-index-scan --family thematic
+        python main.py nifty-index-scan --theme defence --market-regime weak
+    """
+    from funds import NiftyIndexOutput
+
+    console.print("\n[bold cyan]Nifty Index Scan[/bold cyan]\n")
+    researcher = _build_nifty_index_researcher(
+        refresh_holdings=refresh_holdings,
+        market_regime=market_regime,
+    )
+    analyses = researcher.scan(family=family, theme=theme)
+    if not analyses:
+        console.print("[red]No Nifty indices matched the requested filters.[/red]")
+        raise typer.Exit(1)
+    NiftyIndexOutput().display_scan_results(analyses, top_n=top)
+    console.print(f"\n[dim]Scored {len(analyses)} curated Nifty indices[/dim]")
+
+
+@app.command()
+def nifty_index_analyze(
+    index: str = typer.Argument(..., help="Nifty index name or identifier"),
+    refresh_holdings: bool = typer.Option(
+        False, "--refresh-holdings", help="Force refresh underlying stock fundamentals"
+    ),
+    market_regime: str = typer.Option(
+        "normal", "--market-regime", help="Market regime: normal, weak, strong"
+    ),
+):
+    """
+    Deep research on a curated Nifty index using a live proxy basket.
+
+    Examples:
+        python main.py nifty-index-analyze "Nifty India Defence"
+        python main.py nifty-index-analyze "Nifty200 Value 30" --market-regime weak
+    """
+    from funds import NiftyIndexOutput
+
+    researcher = _build_nifty_index_researcher(
+        refresh_holdings=refresh_holdings,
+        market_regime=market_regime,
+    )
+    try:
+        analysis = researcher.analyze(index)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    NiftyIndexOutput().display_analysis(analysis)
 
 
 @app.command()
@@ -1747,6 +1864,923 @@ def portfolio_risk(
         console.print("\n[bold yellow]Warnings:[/bold yellow]")
         for w in report.warnings:
             console.print(f"  [yellow]• {w}[/yellow]")
+
+
+# =============================================================================
+# RRG — Relative Rotation Graph
+# =============================================================================
+
+@app.command()
+def rrg(
+    benchmark: str = typer.Option("^NSEI", "--benchmark", "-b", help="Benchmark index symbol"),
+    top: int = typer.Option(15, "--top", "-n", help="Show top N sectors/stocks"),
+):
+    """Relative Rotation Graph — sector rotation quadrants (Leading/Weakening/Lagging/Improving)."""
+    from rich.table import Table
+    from data.fetcher import StockDataFetcher
+    from indicators.rrg import RRGCalculator
+    from config import get_nifty100_symbols
+
+    console.print("\n[bold cyan]Relative Rotation Graph[/bold cyan]\n")
+
+    fetcher = StockDataFetcher()
+    rrg_calc = RRGCalculator()
+
+    with console.status("Fetching benchmark data..."):
+        bench_df = fetcher.fetch_stock_data(benchmark, 'daily')
+        if bench_df is None or len(bench_df) < 100:
+            console.print("[red]Could not fetch benchmark data[/red]")
+            raise typer.Exit(1)
+
+    symbols = get_nifty100_symbols()[:top * 3]
+    stock_dfs = {}
+    with console.status(f"Fetching data for {len(symbols)} stocks..."):
+        for sym in symbols:
+            df = fetcher.fetch_stock_data(sym, 'daily')
+            if df is not None and len(df) >= 100:
+                stock_dfs[sym] = df
+
+    if len(stock_dfs) < 3:
+        console.print("[red]Not enough data[/red]")
+        raise typer.Exit(1)
+
+    results = rrg_calc.calculate_universe(stock_dfs, bench_df)
+
+    quadrant_colors = {
+        'Leading': 'green', 'Weakening': 'yellow',
+        'Lagging': 'red', 'Improving': 'cyan',
+    }
+
+    t = Table(title="RRG Quadrant Analysis", show_header=True)
+    t.add_column("#", style="dim")
+    t.add_column("Symbol", style="bold")
+    t.add_column("Quadrant")
+    t.add_column("RS-Ratio", justify="right")
+    t.add_column("RS-Momentum", justify="right")
+
+    for i, r in enumerate(results[:top], 1):
+        color = quadrant_colors.get(r.quadrant, 'white')
+        t.add_row(
+            str(i), r.symbol,
+            f"[{color}]{r.quadrant}[/{color}]",
+            f"{r.rs_ratio:.2f}", f"{r.rs_momentum:.2f}",
+        )
+    console.print(t)
+
+    # Summary by quadrant
+    for q in ['Leading', 'Improving', 'Weakening', 'Lagging']:
+        stocks_in_q = [r.symbol for r in results if r.quadrant == q]
+        if stocks_in_q:
+            color = quadrant_colors[q]
+            console.print(f"  [{color}]{q}[/{color}]: {', '.join(stocks_in_q[:8])}")
+
+
+# =============================================================================
+# Insiders — Bulk Deal & Insider Tracker
+# =============================================================================
+
+@app.command()
+def insiders(
+    symbol: str = typer.Argument(..., help="Stock symbol to check"),
+):
+    """Track insider/promoter buying patterns and institutional accumulation."""
+    from data.insider_tracker import InsiderTracker
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder
+
+    console.print(f"\n[bold cyan]Insider/Smart Money Tracker — {symbol.upper()}[/bold cyan]\n")
+
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol.upper())
+    if not raw:
+        console.print(f"[red]Could not fetch data for {symbol}[/red]")
+        raise typer.Exit(1)
+
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+    tracker = InsiderTracker()
+    signals = tracker.analyze(profile, raw)
+    composite = tracker.get_composite_score(signals)
+
+    if composite > 30:
+        color = 'green'
+    elif composite < -30:
+        color = 'red'
+    else:
+        color = 'yellow'
+    console.print(f"  Composite Score: [{color}]{composite:+d}[/{color}] (-100 to +100)\n")
+
+    if signals:
+        for sig in signals:
+            s_color = 'green' if sig.score > 0 else 'red' if sig.score < 0 else 'dim'
+            console.print(f"  [{s_color}]{sig.signal_type}[/{s_color}] ({sig.strength})")
+            console.print(f"    Score: {sig.score:+d}")
+            for k, v in sig.details.items():
+                console.print(f"    {k}: {v}")
+            console.print()
+    else:
+        console.print("  [dim]No insider signals detected[/dim]")
+
+    # Ownership snapshot
+    console.print(f"  [bold]Ownership Snapshot:[/bold]")
+    console.print(f"    Promoter: {profile.promoter_holding:.1f}% (change: {profile.promoter_holding_change_1y:+.1f}%)")
+    console.print(f"    FII: {profile.fii_holding:.1f}% (change: {profile.fii_holding_change_1y:+.1f}%)")
+    console.print(f"    DII: {profile.dii_holding:.1f}%")
+    if profile.promoter_pledge > 0:
+        console.print(f"    Pledge: {profile.promoter_pledge:.1f}%")
+
+
+# =============================================================================
+# Scoring Models (Piotroski, Altman Z, Beneish M)
+# =============================================================================
+
+@app.command()
+def score(
+    symbol: str = typer.Argument(..., help="Stock symbol to score"),
+    model: str = typer.Option("all", "--model", "-m", help="Scoring model: piotroski, altman, beneish, or all"),
+):
+    """Run financial scoring models on a stock (Piotroski F-Score, Altman Z, Beneish M)."""
+    from rich.table import Table
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder
+
+    console.print(f"\n[bold cyan]Financial Scoring — {symbol.upper()}[/bold cyan]\n")
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol.upper())
+    if not raw:
+        console.print(f"[red]Could not fetch data for {symbol}[/red]")
+        raise typer.Exit(1)
+
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+
+    models_to_run = ['piotroski', 'altman', 'beneish'] if model == 'all' else [model]
+
+    for m in models_to_run:
+        if m == 'piotroski':
+            from fundamentals.scores.piotroski import PiotroskiFScore
+            result = PiotroskiFScore().score(profile, raw)
+            zone_color = {'STRONG': 'green', 'MODERATE': 'yellow', 'WEAK': 'red'}.get(result.zone, 'white')
+            console.print(f"\n[bold]Piotroski F-Score: [{zone_color}]{result.f_score}/9 ({result.zone})[/{zone_color}][/bold]")
+            t = Table(show_header=True)
+            t.add_column("Criterion", style="cyan")
+            t.add_column("Pass", justify="center")
+            for k, v in result.criteria.items():
+                t.add_row(k, "[green]YES[/green]" if v else "[red]NO[/red]")
+            console.print(t)
+
+        elif m == 'altman':
+            from fundamentals.scores.altman import AltmanZScore
+            result = AltmanZScore().score(profile, raw)
+            if not result.is_applicable:
+                console.print("\n[dim]Altman Z-Score: Not applicable for banking/finance[/dim]")
+            else:
+                zone_color = {'SAFE': 'green', 'GREY': 'yellow', 'DISTRESS': 'red'}.get(result.zone, 'white')
+                console.print(f"\n[bold]Altman Z-Score: [{zone_color}]{result.z_score:.2f} ({result.zone})[/{zone_color}][/bold]")
+                for k, v in result.components.items():
+                    console.print(f"  {k}: {v:.4f}")
+
+        elif m == 'beneish':
+            from fundamentals.scores.beneish import BeneishMScore
+            result = BeneishMScore().score(profile, raw)
+            flag_color = 'red' if result.is_manipulator else 'green'
+            label = 'LIKELY MANIPULATOR' if result.is_manipulator else 'UNLIKELY MANIPULATOR'
+            console.print(f"\n[bold]Beneish M-Score: [{flag_color}]{result.m_score:.2f} ({label})[/{flag_color}][/bold]")
+            console.print(f"  Confidence: {result.confidence}")
+
+    for d in result.details:
+        console.print(f"  [dim]{d}[/dim]")
+
+
+# =============================================================================
+# Valuation Models (DCF, DDM, Peer Relative, Monte Carlo)
+# =============================================================================
+
+@app.command()
+def valuate(
+    symbol: str = typer.Argument(..., help="Stock symbol to valuate"),
+    model: str = typer.Option("all", "--model", "-m", help="Valuation model: dcf, ddm, peer, monte_carlo, or all"),
+):
+    """Run valuation models on a stock (DCF, DDM, Peer Relative, Monte Carlo)."""
+    from rich.table import Table
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder
+
+    console.print(f"\n[bold cyan]Valuation Analysis — {symbol.upper()}[/bold cyan]\n")
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol.upper())
+    if not raw:
+        console.print(f"[red]Could not fetch data for {symbol}[/red]")
+        raise typer.Exit(1)
+
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+
+    models_to_run = ['dcf', 'ddm', 'peer', 'monte_carlo'] if model == 'all' else [model]
+
+    t = Table(title="Valuation Summary", show_header=True)
+    t.add_column("Model", style="cyan")
+    t.add_column("Fair Value", justify="right")
+    t.add_column("Current", justify="right")
+    t.add_column("Margin of Safety", justify="right")
+    t.add_column("Signal", justify="center")
+    t.add_column("Confidence")
+
+    for m in models_to_run:
+        try:
+            if m == 'dcf':
+                from fundamentals.valuation.dcf import DCFValuation
+                result = DCFValuation().value(profile, raw)
+            elif m == 'ddm':
+                from fundamentals.valuation.ddm import DDMValuation
+                result = DDMValuation().value(profile, raw)
+            elif m == 'peer':
+                from fundamentals.valuation.peer_relative import PeerRelativeValuation
+                result = PeerRelativeValuation().value(profile, raw)
+            elif m == 'monte_carlo':
+                from fundamentals.valuation.monte_carlo import MonteCarloValuation
+                result = MonteCarloValuation().value(profile, raw)
+            else:
+                continue
+
+            signal_color = {'UNDERVALUED': 'green', 'FAIR': 'yellow', 'OVERVALUED': 'red', 'NOT_APPLICABLE': 'dim'}.get(result.signal, 'white')
+            t.add_row(
+                result.model.upper(),
+                f"₹{result.fair_value:,.0f}" if result.fair_value > 0 else "N/A",
+                f"₹{result.current_price:,.0f}",
+                f"{result.margin_of_safety_pct:+.1f}%",
+                f"[{signal_color}]{result.signal}[/{signal_color}]",
+                result.confidence,
+            )
+        except Exception as e:
+            t.add_row(m.upper(), "Error", "", "", str(e)[:30], "")
+
+    console.print(t)
+
+
+# =============================================================================
+# Multibagger Scanner
+# =============================================================================
+
+@app.command()
+def multibagger_scan(
+    top: int = typer.Option(10, "--top", "-n", help="Show top N candidates"),
+    sector: Optional[str] = typer.Option(None, "--sector", "-s", help="Filter by sector"),
+):
+    """Scan for potential multibagger candidates using multi-signal analysis."""
+    from rich.table import Table
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder
+    from fundamentals.screens.multibagger import MultibaggerScreen
+    from config import get_nifty500_symbols
+
+    console.print("\n[bold cyan]Multibagger Scanner[/bold cyan]\n")
+    symbols = get_nifty500_symbols()
+    if not symbols:
+        console.print("[red]No symbols found in stocks.json[/red]")
+        raise typer.Exit(1)
+
+    fetcher = ScreenerFetcher()
+    builder = ProfileBuilder()
+    screen = MultibaggerScreen()
+    results = []
+
+    with console.status(f"Scanning {len(symbols)} stocks..."):
+        for i, sym in enumerate(symbols):
+            try:
+                raw = fetcher.fetch_stock(sym)
+                if not raw or raw.data_quality == 'MISSING':
+                    continue
+                profile = builder.build(raw)
+                if sector and profile.sector.lower() != sector.lower():
+                    continue
+                sr = screen.screen(profile, raw)
+                if sr.score > 0:
+                    results.append(sr)
+            except Exception:
+                continue
+
+    results.sort(key=lambda x: x.score, reverse=True)
+    results = results[:top]
+
+    if not results:
+        console.print("[yellow]No multibagger candidates found[/yellow]")
+        raise typer.Exit()
+
+    t = Table(title=f"Top {len(results)} Multibagger Candidates", show_header=True)
+    t.add_column("#", style="dim")
+    t.add_column("Symbol", style="bold")
+    t.add_column("Sector")
+    t.add_column("Score", justify="right", style="cyan")
+    t.add_column("Pass", justify="center")
+    t.add_column("Key Strengths")
+
+    for i, r in enumerate(results, 1):
+        pass_str = "[green]YES[/green]" if r.passes else "[red]NO[/red]"
+        strengths = " | ".join(r.criteria_met[:3]) if r.criteria_met else ""
+        t.add_row(str(i), r.symbol, r.sector, str(r.score), pass_str, strengths)
+
+    console.print(t)
+
+
+# =============================================================================
+# Theme & Supply Chain Commands
+# =============================================================================
+
+@app.command()
+def themes(
+    theme: Optional[str] = typer.Argument(None, help="Specific theme to analyze"),
+):
+    """List investment themes and their beneficiary stocks."""
+    from rich.table import Table
+    from tailwinds.supply_chain import SupplyChainMapper, THEME_BENEFICIARIES
+
+    mapper = SupplyChainMapper()
+
+    if theme:
+        if theme not in THEME_BENEFICIARIES:
+            console.print(f"[red]Unknown theme: {theme}[/red]")
+            console.print(f"Available: {', '.join(THEME_BENEFICIARIES.keys())}")
+            raise typer.Exit(1)
+
+        info = THEME_BENEFICIARIES[theme]
+        console.print(f"\n[bold cyan]{info['description']}[/bold cyan]\n")
+        for role in ['direct', 'supply_chain', 'raw_material', 'infra']:
+            stocks = info.get(role, [])
+            if stocks:
+                console.print(f"  [bold]{role.replace('_', ' ').title()}:[/bold] {', '.join(stocks)}")
+    else:
+        t = Table(title="Investment Themes", show_header=True)
+        t.add_column("Theme", style="cyan")
+        t.add_column("Description")
+        t.add_column("Stocks", justify="right")
+        for name, info in THEME_BENEFICIARIES.items():
+            total = sum(len(info.get(r, [])) for r in ['direct', 'supply_chain', 'raw_material', 'infra'])
+            t.add_row(name, info['description'], str(total))
+        console.print(t)
+
+
+@app.command()
+def mood():
+    """Show the Market Mood Index (composite sentiment indicator)."""
+    from indicators.market_mood import MarketMoodIndex
+
+    console.print("\n[bold cyan]Market Mood Index[/bold cyan]\n")
+    with console.status("Calculating mood..."):
+        mmi = MarketMoodIndex()
+        result = mmi.calculate()
+
+    mood_colors = {
+        'EXTREME_FEAR': 'red', 'FEAR': 'red',
+        'NEUTRAL': 'yellow',
+        'GREED': 'green', 'EXTREME_GREED': 'green',
+    }
+    color = mood_colors.get(result.mood_label, 'white')
+    console.print(f"  Mood Score: [{color}]{result.mood_score}/100[/{color}]")
+    console.print(f"  Label: [{color}]{result.mood_label}[/{color}]")
+    console.print(f"  Interpretation: {result.interpretation}\n")
+
+    for comp, val in result.components.items():
+        console.print(f"  {comp}: {val}/100")
+
+
+@app.command()
+def inflection(
+    symbol: str = typer.Argument(..., help="Stock symbol to analyze"),
+):
+    """Detect fundamental inflection points for a stock."""
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder
+    from fundamentals.inflection import InflectionDetector
+
+    console.print(f"\n[bold cyan]Inflection Detection — {symbol.upper()}[/bold cyan]\n")
+
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol.upper())
+    if not raw:
+        console.print(f"[red]Could not fetch data for {symbol}[/red]")
+        raise typer.Exit(1)
+
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+    detector = InflectionDetector()
+    result = detector.detect(profile, raw)
+
+    stage_colors = {
+        'NO_INFLECTION': 'dim', 'EARLY_INFLECTION': 'yellow',
+        'CONFIRMED_INFLECTION': 'green', 'MATURE_INFLECTION': 'cyan',
+    }
+    color = stage_colors.get(result.stage, 'white')
+    console.print(f"  Stage: [{color}]{result.stage}[/{color}]")
+    console.print(f"  Score: {result.inflection_score}/100")
+
+    if result.signals:
+        console.print(f"\n  [bold]Detected Signals:[/bold]")
+        for sig in result.signals:
+            strength_color = {'STRONG': 'green', 'MODERATE': 'yellow', 'EARLY': 'dim'}.get(sig.strength, 'white')
+            console.print(f"    [{strength_color}]{sig.signal_type}[/{strength_color}] ({sig.strength}) — Score: {sig.score}")
+            for ev in sig.evidence:
+                console.print(f"      {ev}")
+    else:
+        console.print("  [dim]No inflection signals detected[/dim]")
+
+
+@app.command()
+def smart_money(
+    symbol: str = typer.Argument(..., help="Stock symbol to analyze"),
+):
+    """Track smart money (promoter/FII/DII) accumulation patterns."""
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder
+    from data.smart_money import SmartMoneyTracker
+
+    console.print(f"\n[bold cyan]Smart Money Analysis — {symbol.upper()}[/bold cyan]\n")
+
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol.upper())
+    if not raw:
+        console.print(f"[red]Could not fetch data for {symbol}[/red]")
+        raise typer.Exit(1)
+
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+    tracker = SmartMoneyTracker()
+    result = tracker.analyze(profile, raw)
+
+    signal_colors = {
+        'STRONG_ACCUMULATION': 'green', 'ACCUMULATION': 'green',
+        'NEUTRAL': 'yellow',
+        'DISTRIBUTION': 'red', 'STRONG_DISTRIBUTION': 'red',
+    }
+    color = signal_colors.get(result.signal, 'white')
+    console.print(f"  Signal: [{color}]{result.signal}[/{color}]")
+    console.print(f"  Composite Score: {result.composite_score}")
+    console.print(f"  Convergence: {'YES' if result.convergence else 'NO'}")
+
+    if result.smart_money_signals:
+        for sig in result.smart_money_signals:
+            action_color = 'green' if sig.action == 'ACCUMULATING' else 'red' if sig.action == 'DISTRIBUTING' else 'dim'
+            console.print(f"\n  [{action_color}]{sig.holder_type}: {sig.action}[/{action_color}]")
+            console.print(f"    Velocity: {sig.velocity:+.2f}%/qtr | Acceleration: {sig.acceleration:+.2f}")
+            console.print(f"    Trend: {sig.quarters_of_trend} quarters | Strength: {sig.strength}")
+
+
+@app.command()
+def catalysts(
+    symbol: str = typer.Argument(..., help="Stock symbol to scan"),
+):
+    """Scan news for company-specific catalysts (orders, expansions, approvals)."""
+    from rich.table import Table
+    from data.catalyst_scanner import CatalystScanner
+
+    console.print(f"\n[bold cyan]Catalyst Scanner — {symbol.upper()}[/bold cyan]\n")
+
+    with console.status("Scanning news..."):
+        scanner = CatalystScanner()
+        result = scanner.scan(symbol.upper())
+
+    signal_colors = {
+        'STRONG_CATALYST': 'green', 'MODERATE_CATALYST': 'yellow',
+        'WEAK_CATALYST': 'dim', 'NO_CATALYST': 'red',
+    }
+    color = signal_colors.get(result.signal, 'white')
+    console.print(f"  Signal: [{color}]{result.signal}[/{color}]")
+    console.print(f"  Catalyst Score: {result.catalyst_score}/100")
+    if result.dominant_catalyst:
+        console.print(f"  Dominant Type: {result.dominant_catalyst}")
+
+    if result.catalysts:
+        t = Table(show_header=True)
+        t.add_column("Type", style="cyan")
+        t.add_column("Headline")
+        t.add_column("+/-", justify="center")
+        for c in result.catalysts[:10]:
+            sentiment = "[green]+[/green]" if c.is_positive else "[red]-[/red]"
+            t.add_row(c.catalyst_type, c.headline[:80], sentiment)
+        console.print(t)
+    else:
+        console.print("  [dim]No catalysts found in recent news[/dim]")
+
+
+@app.command()
+def rs_rank(
+    top: int = typer.Option(20, "--top", "-n", help="Show top N stocks by RS rating"),
+):
+    """Rank stocks by O'Neil Relative Strength Rating (1-99)."""
+    from rich.table import Table
+    from data.fetcher import StockDataFetcher
+    from indicators.rs_rating import RSRating
+    from config import get_nifty100_symbols
+
+    console.print("\n[bold cyan]O'Neil RS Rating Rankings[/bold cyan]\n")
+
+    symbols = get_nifty100_symbols()
+    if not symbols:
+        console.print("[red]No symbols found[/red]")
+        raise typer.Exit(1)
+
+    fetcher = StockDataFetcher()
+    rs = RSRating()
+    stock_dfs = {}
+
+    with console.status(f"Fetching data for {len(symbols)} stocks..."):
+        for sym in symbols:
+            df = fetcher.fetch_stock_data(sym, 'daily')
+            if df is not None and len(df) >= 200:
+                stock_dfs[sym] = df
+
+    if len(stock_dfs) < 5:
+        console.print("[red]Not enough data for ranking[/red]")
+        raise typer.Exit(1)
+
+    results = rs.rank_universe(stock_dfs)[:top]
+
+    t = Table(title=f"Top {len(results)} by RS Rating", show_header=True)
+    t.add_column("#", style="dim")
+    t.add_column("Symbol", style="bold")
+    t.add_column("RS Rating", justify="right", style="cyan")
+    t.add_column("Interpretation")
+    t.add_column("Raw Score", justify="right")
+
+    for i, r in enumerate(results, 1):
+        color = 'green' if r.rs_rating >= 80 else 'yellow' if r.rs_rating >= 60 else 'white'
+        t.add_row(str(i), r.symbol, f"[{color}]{r.rs_rating}[/{color}]", r.interpretation, f"{r.raw_score:.1f}%")
+    console.print(t)
+
+
+# =============================================================================
+# Deep Analysis (combines all new modules)
+# =============================================================================
+
+@app.command()
+def deep_analyze(
+    symbol: str = typer.Argument(..., help="Stock symbol for deep analysis"),
+):
+    """Deep analysis combining scoring, valuation, inflection, smart money, and catalysts."""
+    from rich.table import Table
+    from rich.panel import Panel
+    from fundamentals.screener_fetcher import ScreenerFetcher
+    from fundamentals.scorer import ProfileBuilder, FundamentalScorer
+
+    console.print(f"\n[bold cyan]Deep Analysis — {symbol.upper()}[/bold cyan]\n")
+
+    fetcher = ScreenerFetcher()
+    raw = fetcher.fetch_stock(symbol.upper())
+    if not raw:
+        console.print(f"[red]Could not fetch data for {symbol}[/red]")
+        raise typer.Exit(1)
+
+    builder = ProfileBuilder()
+    profile = builder.build(raw)
+    scorer = FundamentalScorer()
+    fs = scorer.score(profile)
+
+    # Header
+    console.print(f"  {profile.company_name} | {profile.sector} | Mkt Cap: ₹{profile.market_cap:,.0f} Cr")
+    console.print(f"  Price: ₹{profile.current_price:,.0f} | PE: {profile.pe_ratio or 0:.1f} | ROE: {profile.roe or 0:.1f}% | ROCE: {profile.roce or 0:.1f}%")
+    console.print(f"  Fundamental Score: {fs.total_score}/100 ({fs.grade})\n")
+
+    # Scoring Models
+    console.print("[bold]1. Financial Scoring Models[/bold]")
+    try:
+        from fundamentals.scores.piotroski import PiotroskiFScore
+        p = PiotroskiFScore().score(profile, raw)
+        zone_c = {'STRONG': 'green', 'MODERATE': 'yellow', 'WEAK': 'red'}.get(p.zone, 'white')
+        console.print(f"   Piotroski F-Score: [{zone_c}]{p.f_score}/9 ({p.zone})[/{zone_c}]")
+    except Exception:
+        console.print("   Piotroski: [dim]unavailable[/dim]")
+
+    try:
+        from fundamentals.scores.altman import AltmanZScore
+        a = AltmanZScore().score(profile, raw)
+        if a.is_applicable:
+            zone_c = {'SAFE': 'green', 'GREY': 'yellow', 'DISTRESS': 'red'}.get(a.zone, 'white')
+            console.print(f"   Altman Z-Score: [{zone_c}]{a.z_score:.2f} ({a.zone})[/{zone_c}]")
+        else:
+            console.print("   Altman Z-Score: [dim]N/A (banking)[/dim]")
+    except Exception:
+        console.print("   Altman: [dim]unavailable[/dim]")
+
+    try:
+        from fundamentals.scores.beneish import BeneishMScore
+        b = BeneishMScore().score(profile, raw)
+        flag_c = 'red' if b.is_manipulator else 'green'
+        label = 'FLAG' if b.is_manipulator else 'CLEAN'
+        console.print(f"   Beneish M-Score: [{flag_c}]{b.m_score:.2f} ({label})[/{flag_c}] [dim]({b.confidence} confidence)[/dim]")
+    except Exception:
+        console.print("   Beneish: [dim]unavailable[/dim]")
+
+    # Valuation
+    console.print("\n[bold]2. Valuation Models[/bold]")
+    val_table = Table(show_header=True, show_edge=False, pad_edge=False)
+    val_table.add_column("Model", style="cyan")
+    val_table.add_column("Fair Value", justify="right")
+    val_table.add_column("MoS", justify="right")
+    val_table.add_column("Signal")
+
+    for vmodel_name, vmodel_cls_path in [
+        ('DCF', 'fundamentals.valuation.dcf.DCFValuation'),
+        ('DDM', 'fundamentals.valuation.ddm.DDMValuation'),
+        ('Peer', 'fundamentals.valuation.peer_relative.PeerRelativeValuation'),
+        ('Monte Carlo', 'fundamentals.valuation.monte_carlo.MonteCarloValuation'),
+    ]:
+        try:
+            parts = vmodel_cls_path.rsplit('.', 1)
+            mod = __import__(parts[0], fromlist=[parts[1]])
+            cls = getattr(mod, parts[1])
+            vr = cls().value(profile, raw)
+            sc = {'UNDERVALUED': 'green', 'FAIR': 'yellow', 'OVERVALUED': 'red'}.get(vr.signal, 'dim')
+            val_table.add_row(
+                vmodel_name,
+                f"₹{vr.fair_value:,.0f}" if vr.fair_value > 0 else "N/A",
+                f"{vr.margin_of_safety_pct:+.1f}%",
+                f"[{sc}]{vr.signal}[/{sc}]",
+            )
+        except Exception:
+            val_table.add_row(vmodel_name, "—", "—", "[dim]error[/dim]")
+    console.print(val_table)
+
+    # Inflection
+    console.print("\n[bold]3. Inflection Detection[/bold]")
+    try:
+        from fundamentals.inflection import InflectionDetector
+        inf = InflectionDetector().detect(profile, raw)
+        sc = {'CONFIRMED_INFLECTION': 'green', 'EARLY_INFLECTION': 'yellow', 'MATURE_INFLECTION': 'cyan'}.get(inf.stage, 'dim')
+        console.print(f"   Stage: [{sc}]{inf.stage}[/{sc}] | Score: {inf.inflection_score}/100")
+        for sig in inf.signals:
+            console.print(f"   • {sig.signal_type} ({sig.strength})")
+    except Exception:
+        console.print("   [dim]unavailable[/dim]")
+
+    # Smart Money
+    console.print("\n[bold]4. Smart Money[/bold]")
+    try:
+        from data.smart_money import SmartMoneyTracker
+        sm = SmartMoneyTracker().analyze(profile, raw)
+        sc = {'STRONG_ACCUMULATION': 'green', 'ACCUMULATION': 'green', 'DISTRIBUTION': 'red', 'STRONG_DISTRIBUTION': 'red'}.get(sm.signal, 'yellow')
+        console.print(f"   Signal: [{sc}]{sm.signal}[/{sc}] | Score: {sm.composite_score} | Convergence: {'YES' if sm.convergence else 'NO'}")
+    except Exception:
+        console.print("   [dim]unavailable[/dim]")
+
+    # Catalysts
+    console.print("\n[bold]5. Catalyst Scanner[/bold]")
+    try:
+        from data.catalyst_scanner import CatalystScanner
+        cat = CatalystScanner().scan(symbol.upper(), profile.company_name)
+        sc = {'STRONG_CATALYST': 'green', 'MODERATE_CATALYST': 'yellow'}.get(cat.signal, 'dim')
+        console.print(f"   Signal: [{sc}]{cat.signal}[/{sc}] | Score: {cat.catalyst_score}/100")
+        for c in cat.catalysts[:3]:
+            console.print(f"   • [{c.catalyst_type}] {c.headline[:70]}")
+    except Exception:
+        console.print("   [dim]unavailable[/dim]")
+
+    # Supply Chain / Theme exposure
+    console.print("\n[bold]6. Theme Exposure[/bold]")
+    try:
+        from tailwinds.supply_chain import SupplyChainMapper
+        scm = SupplyChainMapper().map_stock(symbol.upper())
+        if scm.theme_count > 0:
+            for te in scm.theme_exposures:
+                console.print(f"   • {te['theme']} ({te['role']})")
+        else:
+            console.print("   [dim]No theme exposure found[/dim]")
+    except Exception:
+        console.print("   [dim]unavailable[/dim]")
+
+    # Screens
+    console.print("\n[bold]7. Screen Matches[/bold]")
+    from fundamentals.screens import SCREENS
+    matches = []
+    for sname, scls in SCREENS.items():
+        try:
+            sr = scls().screen(profile) if sname != 'multibagger' else scls().screen(profile, raw)
+            if sr.passes:
+                matches.append(f"{sname} ({sr.score})")
+        except Exception:
+            continue
+    if matches:
+        console.print(f"   Passes: [green]{', '.join(matches)}[/green]")
+    else:
+        console.print("   [dim]No screens passed[/dim]")
+
+
+@app.command()
+def recommend(
+    universe: str = typer.Option(
+        "nifty_100", "--universe", "-u", help="Universe: nifty_100 or nifty_500"
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Force refresh all data"
+    ),
+):
+    """
+    Master investment recommendation — one multibagger, one hedge, one compounder.
+
+    Orchestrates ALL modules: screens, scoring models, valuation,
+    inflection detection, smart money, catalysts, and themes into
+    a single unified recommendation with full investment thesis.
+
+    Examples:
+        python main.py recommend
+        python main.py recommend --universe nifty_500
+    """
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.columns import Columns
+    from core.investment_orchestrator import InvestmentOrchestrator
+
+    orchestrator = InvestmentOrchestrator(universe=universe)
+    result = orchestrator.recommend(force_refresh=refresh)
+
+    # ── Market Context ──
+    console.print()
+    regime_color = {
+        "STRONG_BULL": "bold green",
+        "BULL": "green",
+        "NEUTRAL": "yellow",
+        "BEAR": "red",
+        "STRONG_BEAR": "bold red",
+        "CRASH": "bold red on white",
+    }.get(result.regime, "white")
+
+    console.print(Panel(
+        f"[{regime_color}]{result.regime}[/{regime_color}]  |  "
+        f"Position sizing: {result.regime_position_size}  |  "
+        f"Should trade: {'YES' if result.regime_should_trade else 'NO'}\n"
+        f"[dim]{result.regime_details.get('rationale', '')}[/dim]",
+        title="[bold]MARKET REGIME[/bold]",
+        border_style="cyan",
+    ))
+
+    if result.regime == "CRASH":
+        console.print("[bold red]CRASH regime — stay 100% cash. Picks below are WATCHLIST only.[/bold red]\n")
+
+    if result.errors:
+        for err in result.errors:
+            console.print(f"[yellow]Warning: {err}[/yellow]")
+
+    console.print(
+        f"[dim]Universe: {result.universe_size} stocks | "
+        f"Fetched: {result.stocks_fetched}[/dim]\n"
+    )
+
+    # ── Render each pick ──
+    picks = [
+        ("MULTIBAGGER", result.multibagger, result.multibagger_alternates, "bold magenta"),
+        ("HEDGE", result.hedge, result.hedge_alternates, "bold blue"),
+        ("COMPOUNDER", result.compounder, result.compounder_alternates, "bold green"),
+    ]
+
+    for bucket_name, thesis, alternates, color in picks:
+        if not thesis:
+            console.print(Panel(
+                "[dim]No qualifying candidate found[/dim]",
+                title=f"[{color}]{bucket_name}[/{color}]",
+                border_style="dim",
+            ))
+            continue
+
+        _render_thesis(console, thesis, bucket_name, color, alternates)
+
+    # ── Summary table ──
+    console.print()
+    summary = Table(title="Recommendation Summary", show_edge=True, border_style="cyan")
+    summary.add_column("Bucket", style="bold")
+    summary.add_column("Stock")
+    summary.add_column("Price", justify="right")
+    summary.add_column("Fair Value", justify="right")
+    summary.add_column("MoS", justify="right")
+    summary.add_column("Fund. Score", justify="right")
+    summary.add_column("Conviction")
+
+    for bucket_name, thesis, _, _ in picks:
+        if thesis:
+            mos_color = "green" if thesis.margin_of_safety > 0 else "red"
+            conv_color = {"HIGH": "green", "MEDIUM": "yellow", "LOW": "red"}.get(thesis.conviction, "white")
+            summary.add_row(
+                bucket_name,
+                f"{thesis.symbol}",
+                f"₹{thesis.current_price:,.0f}",
+                f"₹{thesis.fair_value:,.0f}" if thesis.fair_value else "—",
+                f"[{mos_color}]{thesis.margin_of_safety:+.0f}%[/{mos_color}]" if thesis.fair_value else "—",
+                f"{thesis.fundamental_score}/100",
+                f"[{conv_color}]{thesis.conviction}[/{conv_color}]",
+            )
+        else:
+            summary.add_row(bucket_name, "—", "—", "—", "—", "—", "—")
+
+    console.print(summary)
+    console.print(
+        "\n[dim]Disclaimer: This is a quantitative screening tool, not investment advice. "
+        "Always do your own research before investing.[/dim]\n"
+    )
+
+
+def _render_thesis(console, t, bucket_name, color, alternates):
+    """Render a single StockThesis as a rich panel."""
+    from rich.table import Table
+    from rich.panel import Panel
+
+    lines = []
+
+    # Header
+    lines.append(
+        f"[bold]{t.company_name}[/bold] ({t.symbol})  |  "
+        f"{t.sector}  |  Mkt Cap: ₹{t.market_cap:,.0f} Cr"
+    )
+    lines.append(
+        f"Price: ₹{t.current_price:,.0f}  |  "
+        f"PE: {t.pe_ratio or 0:.1f}  |  ROE: {t.roe or 0:.1f}%  |  ROCE: {t.roce or 0:.1f}%  |  "
+        f"D/E: {t.debt_to_equity:.2f}"
+    )
+    lines.append("")
+
+    # Thesis summary
+    lines.append(f"[italic]{t.thesis_summary}[/italic]")
+    lines.append("")
+
+    # Screens passed
+    if t.screens_passed:
+        lines.append(f"Screens: [green]{', '.join(t.screens_passed)}[/green]")
+
+    # Scoring models
+    scoring_parts = []
+    if t.piotroski is not None:
+        pc = {"STRONG": "green", "MODERATE": "yellow", "WEAK": "red"}.get(t.piotroski_zone, "white")
+        scoring_parts.append(f"Piotroski [{pc}]{t.piotroski}/9[/{pc}]")
+    if t.altman_z is not None:
+        ac = {"SAFE": "green", "GREY": "yellow", "DISTRESS": "red"}.get(t.altman_zone, "white")
+        scoring_parts.append(f"Altman [{ac}]{t.altman_z:.2f}[/{ac}]")
+    if t.beneish_m is not None:
+        bc = "red" if t.beneish_flag else "green"
+        label = "FLAG" if t.beneish_flag else "CLEAN"
+        scoring_parts.append(f"Beneish [{bc}]{label}[/{bc}]")
+    if scoring_parts:
+        lines.append(f"Scores: {' | '.join(scoring_parts)}")
+
+    # Valuation
+    if t.valuation_models:
+        val_parts = []
+        for vm in t.valuation_models:
+            sc = {"UNDERVALUED": "green", "FAIR": "yellow", "OVERVALUED": "red"}.get(vm["signal"], "dim")
+            fv = f"₹{vm['fair_value']:,.0f}" if vm["fair_value"] > 0 else "N/A"
+            val_parts.append(f"{vm['model']}: {fv} [{sc}]{vm['signal']}[/{sc}]")
+        lines.append(f"Valuations: {' | '.join(val_parts)}")
+
+    # Inflection
+    if t.inflection_stage:
+        ic = {"CONFIRMED_INFLECTION": "green", "EARLY_INFLECTION": "yellow"}.get(t.inflection_stage, "dim")
+        lines.append(f"Inflection: [{ic}]{t.inflection_stage}[/{ic}] (score {t.inflection_score})")
+        for sig in t.inflection_signals[:3]:
+            lines.append(f"  - {sig}")
+
+    # Smart money
+    if t.smart_money_signal:
+        sc = {"STRONG_ACCUMULATION": "green", "ACCUMULATION": "green",
+              "DISTRIBUTION": "red", "STRONG_DISTRIBUTION": "red"}.get(t.smart_money_signal, "yellow")
+        conv = " (converging)" if t.smart_money_convergence else ""
+        lines.append(f"Smart Money: [{sc}]{t.smart_money_signal}[/{sc}]{conv}")
+
+    # Catalysts
+    if t.catalysts:
+        cat_color = {"STRONG_CATALYST": "green", "MODERATE_CATALYST": "yellow"}.get(t.catalyst_signal, "dim")
+        lines.append(f"Catalysts: [{cat_color}]{t.catalyst_signal}[/{cat_color}]")
+        for c in t.catalysts[:2]:
+            lines.append(f"  - {c}")
+
+    # Themes
+    if t.theme_exposures:
+        lines.append(f"Themes: {', '.join(t.theme_exposures[:3])}")
+
+    lines.append("")
+
+    # Bull / Bear case
+    if t.bull_case:
+        lines.append("[green]Bull Case:[/green]")
+        for b in t.bull_case:
+            lines.append(f"  + {b}")
+
+    if t.bear_case:
+        lines.append("[red]Bear Case:[/red]")
+        for b in t.bear_case:
+            lines.append(f"  - {b}")
+
+    # Conviction
+    conv_color = {"HIGH": "green", "MEDIUM": "yellow", "LOW": "red"}.get(t.conviction, "white")
+    lines.append(f"\nConviction: [{conv_color}]{t.conviction}[/{conv_color}]  |  "
+                 f"Fundamental: {t.fundamental_score}/100 ({t.fundamental_grade})  |  "
+                 f"Composite: {t.composite_score}/100 ({t.composite_grade})")
+
+    # Alternates
+    if alternates:
+        lines.append(f"[dim]Alternates: {', '.join(alternates)}[/dim]")
+
+    console.print(Panel(
+        "\n".join(lines),
+        title=f"[{color}]{bucket_name}[/{color}]",
+        border_style=color.replace("bold ", ""),
+        padding=(1, 2),
+    ))
 
 
 def main():

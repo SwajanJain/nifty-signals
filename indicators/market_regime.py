@@ -240,19 +240,23 @@ class RegimeDetector:
         # Combined score
         total_score = trend['score'] + volatility['score'] + breadth['score']
 
-        # Determine regime
+        # Regime thresholds — empirically set based on Nifty 50 historical
+        # behavior. These have NOT been backtested or optimized. The score
+        # combines trend strength (-3 to +3), volatility (-2 to +2), and
+        # breadth (-2 to +2) for a total range of roughly -7 to +7.
+        # Review annually against actual regime transitions.
         if volatility['regime'] == "EXTREME" and total_score < -3:
-            regime = MarketRegime.CRASH
+            regime = MarketRegime.CRASH       # Extreme vol + clearly negative
         elif total_score >= 5:
-            regime = MarketRegime.STRONG_BULL
+            regime = MarketRegime.STRONG_BULL  # All factors positive
         elif total_score >= 2:
-            regime = MarketRegime.BULL
+            regime = MarketRegime.BULL         # Moderately positive
         elif total_score >= -1:
-            regime = MarketRegime.NEUTRAL
+            regime = MarketRegime.NEUTRAL      # Mixed signals
         elif total_score >= -4:
-            regime = MarketRegime.BEAR
+            regime = MarketRegime.BEAR         # Moderately negative
         else:
-            regime = MarketRegime.STRONG_BEAR
+            regime = MarketRegime.STRONG_BEAR  # All factors negative
 
         # Strategy recommendations based on regime
         strategy = self._get_strategy_recommendation(regime, volatility['vix'])

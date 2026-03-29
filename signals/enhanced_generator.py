@@ -191,7 +191,10 @@ class EnhancedSignalGenerator:
             cpr_signals = cpr_calc.get_all_signals()
             bb_pat_signals = bb_patterns.get_all_signals()
 
-            # Base score
+            # Base score — NOTE: This score is computed from the latest bar
+            # and may flip between runs on consecutive days. Consumers should
+            # not treat a single-day score change as a confirmed signal reversal.
+            # Consider requiring signals to persist for 2+ bars before acting.
             base_score = (
                 tech_signals['total_score'] +
                 pa_signals['total_score'] +
